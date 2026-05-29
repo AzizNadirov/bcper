@@ -20,9 +20,12 @@ class BackupsTab(tk.Frame):
         self.store_combo.pack(side="left", padx=(0, 8), pady=6)
         self.store_combo.bind("<<ComboboxSelected>>", lambda e: self._load_backups())
         ttk.Button(top, text="Refresh", command=self._load_backups).pack(side="left", padx=(0, 4), pady=6)
-        ttk.Button(top, text="📥 Restore", command=self._restore).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(top, text="Restore", command=self._restore).pack(side="left", padx=(0, 4), pady=6)
         ttk.Button(top, text="Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
+
+        self.status_label = tk.Label(self, text="", fg="#555555", font=("Helvetica", 9, "italic"))
+        self.status_label.pack(anchor="w", padx=8)
 
         cols = ("archive",)
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
@@ -52,11 +55,14 @@ class BackupsTab(tk.Frame):
         if not store:
             return
         self.tree.delete(*self.tree.get_children())
+        self.status_label.config(text=f"Loading backups from '{store}'...")
         run_async(lambda: self.client.list_backups(store), self._on_backups)
 
     def _on_backups(self, resp, err):
         if err:
+            self.status_label.config(text=f"Error: {err}")
             return
+        self.status_label.config(text="")
         for name in resp.get("data", []):
             self.tree.insert("", "end", values=(name,), iid=name)
 
