@@ -304,11 +304,11 @@ class ItemDialog(tk.Toplevel):
         paths = list(self.paths_listbox.get(0, "end"))
         pw = self.pw_var.get().strip() or None
         ignores = [p.strip() for p in self.ignore_text.get("1.0", "end").splitlines() if p.strip()]
-        data = {"key": key, "paths": paths, "password": pw, "bcpignore": ignores}
+        data = {"paths": paths, "password": pw, "bcpignore": ignores}
         if self.item:
             run_async(lambda: self.client.update_item(key, **data), self._on_save)
         else:
-            run_async(lambda: self.client.add_item(**data), self._on_save)
+            run_async(lambda: self.client.add_item(key=key, **data), self._on_save)
 
     def _on_save(self, resp, err):
         if err:
@@ -569,11 +569,11 @@ class VaultDialog(tk.Toplevel):
         keys = list(self.vault_list.get(0, "end"))
         pw = self.pw_var.get().strip() or None
         ignores = [p.strip() for p in self.ignore_text.get("1.0", "end").splitlines() if p.strip()]
-        data = {"name": name, "item_keys": keys, "password": pw, "bcpignore": ignores}
+        data = {"item_keys": keys, "password": pw, "bcpignore": ignores}
         if self.vault:
             run_async(lambda: self.client.update_vault(name, **data), self._on_save)
         else:
-            run_async(lambda: self.client.add_vault(**data), self._on_save)
+            run_async(lambda: self.client.add_vault(name=name, **data), self._on_save)
 
     def _on_save(self, resp, err):
         if err:
