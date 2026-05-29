@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -29,8 +30,12 @@ class Daemon:
 
     def _setup_logging(self):
         os.makedirs(os.path.dirname(self.LOG_PATH), exist_ok=True)
+        handlers = [
+            logging.FileHandler(self.LOG_PATH),
+            logging.StreamHandler(sys.stdout),
+        ]
         logging.basicConfig(
-            filename=self.LOG_PATH,
+            handlers=handlers,
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(message)s",
         )

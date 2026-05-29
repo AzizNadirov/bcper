@@ -1,4 +1,5 @@
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -8,14 +9,16 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 
 from .client import Client
 
+_ui_queue = queue.Queue()
 
-def run_async(master, func, callback):
+
+def run_async(func, callback):
     def wrapper():
         try:
             result = func()
-            master.after(0, lambda: callback(result, None))
+            _ui_queue.put(lambda: callback(result, None))
         except Exception as e:
-            master.after(0, lambda: callback(None, str(e)))
+            _ui_queue.put(lambda: callback(None, str(e)))
     threading.Thread(target=wrapper, daemon=True).start()
 
 
@@ -44,7 +47,17 @@ class App(tk.Tk):
         self.notebook.add(self.status_tab, text="Status")
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
+        self._poll_queue()
         self._check_daemon()
+
+    def _poll_queue(self):
+        try:
+            while True:
+                fn = _ui_queue.get_nowait()
+                fn()
+        except queue.Empty:
+            pass
+        self.after(100, self._poll_queue)
 
     def _check_daemon(self):
         try:
@@ -106,7 +119,7 @@ class ItemsTab(tk.Frame):
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children())
-        run_async(self, self.client.list_items, self._on_refresh)
+        run_async(self.client.list_items, self._on_refresh)
 
     def _on_refresh(self, resp, err):
         if err:
@@ -136,7 +149,7 @@ class ItemsTab(tk.Frame):
             if self.tree.item(child, "iid") == key:
                 # fetch from server to get full data
                 break
-        run_async(self, lambda: self.client.list_items(), lambda r, e: self._open_edit(r, e, key))
+        run_async(lambda: self.client.list_items(), lambda r, e: self._open_edit(r, e, key))
 
     def _open_edit(self, resp, err, key):
         if err:
@@ -151,7 +164,7 @@ class ItemsTab(tk.Frame):
         if not key:
             return
         if messagebox.askyesno("Delete", f"Delete item '{key}'?"):
-            run_async(self, lambda: self.client.delete_item(key), lambda r, e: self.refresh() if not e else None)
+            run_async(lambda: self.client.delete_item(key), lambda r, e: self.refresh() if not e else None)
 
     def _backup(self):
         key = self._selected()
@@ -160,7 +173,7 @@ class ItemsTab(tk.Frame):
         store = self._pick_store()
         if not store:
             return
-        run_async(self, lambda: self.client.backup("item", key, store), self._on_backup_result)
+        run_async(lambda: self.client.backup("item", key, store), self._on_backup_result)
 
     def _pick_store(self):
         resp = self.client.list_stores()
@@ -242,9 +255,9 @@ class ItemDialog(tk.Toplevel):
         ignores = [p.strip() for p in self.ignore_text.get("1.0", "end").splitlines() if p.strip()]
         data = {"key": key, "paths": paths, "password": pw, "bcpignore": ignores}
         if self.item:
-            run_async(self, lambda: self.client.update_item(key, **data), self._on_save)
+            run_async(lambda: self.client.update_item(key, **data), self._on_save)
         else:
-            run_async(self, lambda: self.client.add_item(**data), self._on_save)
+            run_async(lambda: self.client.add_item(**data), self._on_save)
 
     def _on_save(self, resp, err):
         if err:
@@ -291,7 +304,7 @@ class VaultsTab(tk.Frame):
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children())
-        run_async(self, self.client.list_vaults, self._on_refresh)
+        run_async(self.client.list_vaults, self._on_refresh)
 
     def _on_refresh(self, resp, err):
         if err:
@@ -315,7 +328,7 @@ class VaultsTab(tk.Frame):
         name = self._selected()
         if not name:
             return
-        run_async(self, lambda: self.client.list_vaults(), lambda r, e: self._open_edit(r, e, name))
+        run_async(lambda: self.client.list_vaults(), lambda r, e: self._open_edit(r, e, name))
 
     def _open_edit(self, resp, err, name):
         if err:
@@ -330,7 +343,7 @@ class VaultsTab(tk.Frame):
         if not name:
             return
         if messagebox.askyesno("Delete", f"Delete vault '{name}'?"):
-            run_async(self, lambda: self.client.delete_vault(name), lambda r, e: self.refresh() if not e else None)
+            run_async(lambda: self.client.delete_vault(name), lambda r, e: self.refresh() if not e else None)
 
     def _backup(self):
         name = self._selected()
@@ -339,7 +352,7 @@ class VaultsTab(tk.Frame):
         store = self._pick_store()
         if not store:
             return
-        run_async(self, lambda: self.client.backup("vault", name, store), self._on_backup)
+        run_async(lambda: self.client.backup("vault", name, store), self._on_backup)
 
     def _on_backup(self, resp, err):
         if err:
@@ -414,7 +427,7 @@ class VaultDialog(tk.Toplevel):
         f.columnconfigure(1, weight=1)
 
     def _load_items(self):
-        run_async(self, self.client.list_items, self._on_items)
+        run_async(self.client.list_items, self._on_items)
 
     def _on_items(self, resp, err):
         if err:
@@ -432,9 +445,9 @@ class VaultDialog(tk.Toplevel):
         ignores = [p.strip() for p in self.ignore_text.get("1.0", "end").splitlines() if p.strip()]
         data = {"name": name, "item_keys": keys, "password": pw, "bcpignore": ignores}
         if self.vault:
-            run_async(self, lambda: self.client.update_vault(name, **data), self._on_save)
+            run_async(lambda: self.client.update_vault(name, **data), self._on_save)
         else:
-            run_async(self, lambda: self.client.add_vault(**data), self._on_save)
+            run_async(lambda: self.client.add_vault(**data), self._on_save)
 
     def _on_save(self, resp, err):
         if err:
@@ -478,7 +491,7 @@ class StoresTab(tk.Frame):
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children())
-        run_async(self, self.client.list_stores, self._on_refresh)
+        run_async(self.client.list_stores, self._on_refresh)
 
     def _on_refresh(self, resp, err):
         if err:
@@ -505,7 +518,7 @@ class StoresTab(tk.Frame):
         path_var = tk.StringVar(value="~/backups")
         tk.Entry(dlg, textvariable=path_var).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
         def save():
-            run_async(self, lambda: self.client.add_store(name=name_var.get(), type="local", path=path_var.get()),
+            run_async(lambda: self.client.add_store(name=name_var.get(), type="local", path=path_var.get()),
                       lambda r, e: (dlg.destroy(), self.refresh()) if not e else messagebox.showerror("Error", str(e), parent=dlg))
         tk.Button(dlg, text="Save", command=save).grid(row=2, column=1, sticky="e", padx=8, pady=8)
         dlg.columnconfigure(1, weight=1)
@@ -525,7 +538,7 @@ class StoresTab(tk.Frame):
         path_var = tk.StringVar()
         tk.Entry(dlg, textvariable=path_var).grid(row=2, column=1, sticky="ew", padx=8, pady=4)
         def save():
-            run_async(self, lambda: self.client.add_store(name=name_var.get(), type="rclone", remote=remote_var.get(), path=path_var.get()),
+            run_async(lambda: self.client.add_store(name=name_var.get(), type="rclone", remote=remote_var.get(), path=path_var.get()),
                       lambda r, e: (dlg.destroy(), self.refresh()) if not e else messagebox.showerror("Error", str(e), parent=dlg))
         tk.Button(dlg, text="Save", command=save).grid(row=3, column=1, sticky="e", padx=8, pady=8)
         dlg.columnconfigure(1, weight=1)
@@ -535,7 +548,7 @@ class StoresTab(tk.Frame):
         if not name:
             return
         if messagebox.askyesno("Delete", f"Delete store '{name}'?"):
-            run_async(self, lambda: self.client.delete_store(name), lambda r, e: self.refresh() if not e else None)
+            run_async(lambda: self.client.delete_store(name), lambda r, e: self.refresh() if not e else None)
 
 
 # ---- Backups Tab ----
@@ -570,7 +583,7 @@ class BackupsTab(tk.Frame):
         sb.pack(side="right", fill="y")
 
     def refresh(self):
-        run_async(self, self.client.list_stores, self._on_stores)
+        run_async(self.client.list_stores, self._on_stores)
 
     def _on_stores(self, resp, err):
         if err:
@@ -586,7 +599,7 @@ class BackupsTab(tk.Frame):
         if not store:
             return
         self.tree.delete(*self.tree.get_children())
-        run_async(self, lambda: self.client.list_backups(store), self._on_backups)
+        run_async(lambda: self.client.list_backups(store), self._on_backups)
 
     def _on_backups(self, resp, err):
         if err:
@@ -612,7 +625,7 @@ class BackupsTab(tk.Frame):
             if pw is None:
                 return
             password = pw
-        run_async(self, lambda: self.client.restore(archive, store, password=password, target_dir=target), self._on_restore)
+        run_async(lambda: self.client.restore(archive, store, password=password, target_dir=target), self._on_restore)
 
     def _on_restore(self, resp, err):
         if err:
@@ -630,7 +643,7 @@ class BackupsTab(tk.Frame):
             return
         store = self.store_var.get()
         if messagebox.askyesno("Delete", f"Delete '{archive}' from store '{store}'?"):
-            run_async(self, lambda: self.client.delete_backup(archive, store), lambda r, e: self._load_backups() if not e else None)
+            run_async(lambda: self.client.delete_backup(archive, store), lambda r, e: self._load_backups() if not e else None)
 
 
 # ---- Jobs Tab ----
@@ -670,7 +683,7 @@ class JobsTab(tk.Frame):
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children())
-        run_async(self, self.client.list_jobs, self._on_refresh)
+        run_async(self.client.list_jobs, self._on_refresh)
 
     def _on_refresh(self, resp, err):
         if err:
@@ -699,14 +712,14 @@ class JobsTab(tk.Frame):
         jid = self._selected()
         if not jid:
             return
-        run_async(self, lambda: self.client.toggle_job(jid), lambda r, e: self.refresh() if not e else None)
+        run_async(lambda: self.client.toggle_job(jid), lambda r, e: self.refresh() if not e else None)
 
     def _delete(self):
         jid = self._selected()
         if not jid:
             return
         if messagebox.askyesno("Delete", f"Delete job '{jid}'?"):
-            run_async(self, lambda: self.client.delete_job(jid), lambda r, e: self.refresh() if not e else None)
+            run_async(lambda: self.client.delete_job(jid), lambda r, e: self.refresh() if not e else None)
 
 
 class JobDialog(tk.Toplevel):
@@ -751,7 +764,7 @@ class JobDialog(tk.Toplevel):
         f.columnconfigure(1, weight=1)
 
     def _load_data(self):
-        run_async(self, self.client.list_stores, self._on_stores)
+        run_async(self.client.list_stores, self._on_stores)
         self._update_targets()
 
     def _on_stores(self, resp, err):
@@ -764,9 +777,9 @@ class JobDialog(tk.Toplevel):
 
     def _update_targets(self):
         if self.type_var.get() == "item":
-            run_async(self, self.client.list_items, self._on_targets)
+            run_async(self.client.list_items, self._on_targets)
         else:
-            run_async(self, self.client.list_vaults, self._on_targets)
+            run_async(self.client.list_vaults, self._on_targets)
 
     def _on_targets(self, resp, err):
         if err:
@@ -784,7 +797,7 @@ class JobDialog(tk.Toplevel):
             "period_type": self.period_var.get(),
             "interval": int(self.interval_var.get()),
         }
-        run_async(self, lambda: self.client.add_job(**data), self._on_save)
+        run_async(lambda: self.client.add_job(**data), self._on_save)
 
     def _on_save(self, resp, err):
         if err:
@@ -821,7 +834,7 @@ class StatusTab(tk.Frame):
         sb.pack(side="right", fill="y")
 
     def refresh(self):
-        run_async(self, self.client.ping, self._on_ping)
+        run_async(self.client.ping, self._on_ping)
         self._load_log()
 
     def _on_ping(self, resp, err):
