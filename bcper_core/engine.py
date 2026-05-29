@@ -9,6 +9,11 @@ from typing import List, Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
+from cryptography.exceptions import InvalidTag
+
+
+class UserError(ValueError):
+    """Expected user-facing error (e.g. wrong password). No traceback needed."""
 
 from .models import (
     BackupEngine,
@@ -45,7 +50,10 @@ def decrypt_data(data: bytes, password: str) -> bytes:
     ciphertext = data[28:]
     key = derive_key(password, salt)
     aesgcm = AESGCM(key)
-    return aesgcm.decrypt(nonce, ciphertext, None)
+    try:
+        return aesgcm.decrypt(nonce, ciphertext, None)
+    except InvalidTag:
+        raise UserError("Incorrect password") from None
 
 
 def sha256_bytes(data: bytes) -> str:

@@ -25,6 +25,7 @@ from bcper_core.storage import create_store
 class Daemon:
     SOCKET_PATH = os.path.expanduser("~/.config/bcper/daemon.sock")
     LOG_PATH = os.path.expanduser("~/.config/bcper/daemon.log")
+    PID_PATH = os.path.expanduser("~/.config/bcper/daemon.pid")
 
     def __init__(self):
         self.config = Config()
@@ -49,8 +50,32 @@ class Daemon:
         )
         self.logger = logging.getLogger("bcperd")
 
+    def _check_pid(self):
+        if os.path.exists(self.PID_PATH):
+            with open(self.PID_PATH) as f:
+                old_pid = f.read().strip()
+            if old_pid and os.path.exists(f"/proc/{old_pid}"):
+                raise RuntimeError(f"Daemon already running (PID {old_pid}). Kill it or use `pkill -f bcperd`.")
+            else:
+                os.unlink(self.PID_PATH)
+        with open(self.PID_PATH, "w") as f:
+            f.write(str(os.getpid()))
+
+    def _write_pid(self):
+        with open(self.PID_PATH, "w") as f:
+            f.write(str(os.getpid()))
+
+    def _remove_pid(self):
+        if os.path.exists(self.PID_PATH):
+            os.unlink(self.PID_PATH)
+
     def start(self):
-        self.logger.info("Daemon starting")
+        self._check_pid()
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        self.logger.info(f"Daemon starting PID={os.getpid()} module={module_dir}")
+        from .server import IPCProtocol
+        commands = sorted([m[5:] for m in dir(IPCProtocol) if m.startswith("_cmd_")])
+        self.logger.info(f"Registered commands: {commands}")
         self._scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
         self._scheduler_thread.start()
 
@@ -73,6 +98,7 @@ class Daemon:
             self._scheduler_thread.join(timeout=5)
         if os.path.exists(self.SOCKET_PATH):
             os.unlink(self.SOCKET_PATH)
+        self._remove_pid()
 
     def _signal_handler(self):
         self._shutdown_event.set()

@@ -1,5 +1,6 @@
 import os
 import socket
+import threading
 
 from bcper_core import protocol
 
@@ -8,6 +9,7 @@ class Client:
     def __init__(self, socket_path: str = "~/.config/bcper/daemon.sock"):
         self.socket_path = os.path.expanduser(socket_path)
         self._sock = None
+        self._lock = threading.Lock()
 
     def connect(self):
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -23,18 +25,23 @@ class Client:
             self._sock = None
 
     def _call(self, cmd: str, **kwargs) -> dict:
-        if self._sock is None:
-            self.connect()
-        msg = protocol.request(cmd, **kwargs)
-        self._sock.sendall(msg)
-        buf = b""
-        while b"\n" not in buf:
-            chunk = self._sock.recv(4096)
-            if not chunk:
-                raise ConnectionError("Daemon closed connection")
-            buf += chunk
-        line, _ = buf.split(b"\n", 1)
-        return protocol.decode(line)
+        with self._lock:
+            if self._sock is None:
+                self.connect()
+            try:
+                msg = protocol.request(cmd, **kwargs)
+                self._sock.sendall(msg)
+                buf = b""
+                while b"\n" not in buf:
+                    chunk = self._sock.recv(4096)
+                    if not chunk:
+                        raise ConnectionError("Daemon closed connection")
+                    buf += chunk
+                line, _ = buf.split(b"\n", 1)
+                return protocol.decode(line)
+            except (OSError, ConnectionError):
+                self.close()
+                raise
 
     def ping(self):
         return self._call("PING")

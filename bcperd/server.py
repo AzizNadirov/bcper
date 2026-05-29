@@ -1,7 +1,9 @@
 import asyncio
 import os
+import traceback
 
 from bcper_core import protocol
+from bcper_core.engine import UserError
 
 
 class IPCProtocol(asyncio.Protocol):
@@ -27,9 +29,12 @@ class IPCProtocol(asyncio.Protocol):
             if handler:
                 await handler(req)
             else:
+                self.daemon.logger.warning(f"Unknown command from client: {cmd}")
                 self._send(ok=False, error=f"Unknown command: {cmd}")
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            tb = traceback.format_exc()
+            self.daemon.logger.error(f"Exception handling command {cmd}:\n{tb}")
+            self._send(ok=False, error=tb)
 
     def _send(self, ok=True, data=None, error=None):
         if self.transport:
@@ -83,8 +88,8 @@ class IPCProtocol(asyncio.Protocol):
             )
             files = await loop.run_in_executor(None, store.list_backups)
             self._send(ok=True, data=files)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_backup(self, req):
         loop = asyncio.get_event_loop()
@@ -97,8 +102,10 @@ class IPCProtocol(asyncio.Protocol):
                 req["store_name"],
             )
             self._send(ok=True, data=result)
-        except Exception as e:
+        except UserError as e:
             self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_restore(self, req):
         loop = asyncio.get_event_loop()
@@ -112,8 +119,10 @@ class IPCProtocol(asyncio.Protocol):
                 req.get("target_dir"),
             )
             self._send(ok=True, data=result)
-        except Exception as e:
+        except UserError as e:
             self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_delete_backup(self, req):
         store_name = req.get("store_name")
@@ -130,8 +139,8 @@ class IPCProtocol(asyncio.Protocol):
             )
             await loop.run_in_executor(None, store.delete, archive)
             self._send(ok=True)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     # ---- Config CRUD ----
 
@@ -139,57 +148,57 @@ class IPCProtocol(asyncio.Protocol):
         try:
             data = self.daemon.add_item(req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_update_item(self, req):
         try:
             data = self.daemon.update_item(req["key"], req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_delete_item(self, req):
         try:
             self.daemon.delete_item(req["key"])
             self._send(ok=True)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_add_vault(self, req):
         try:
             data = self.daemon.add_vault(req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_update_vault(self, req):
         try:
             data = self.daemon.update_vault(req["name"], req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_delete_vault(self, req):
         try:
             self.daemon.delete_vault(req["name"])
             self._send(ok=True)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_add_store(self, req):
         try:
             data = self.daemon.add_store(req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_delete_store(self, req):
         try:
             self.daemon.delete_store(req["name"])
             self._send(ok=True)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     # ---- Frequencies ----
 
@@ -197,22 +206,22 @@ class IPCProtocol(asyncio.Protocol):
         try:
             data = self.daemon.add_frequency(req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_update_frequency(self, req):
         try:
             data = self.daemon.update_frequency(req["id"], req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_delete_frequency(self, req):
         try:
             self.daemon.delete_frequency(req["id"])
             self._send(ok=True)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     # ---- Jobs ----
 
@@ -220,26 +229,26 @@ class IPCProtocol(asyncio.Protocol):
         try:
             data = self.daemon.add_job(req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_update_job(self, req):
         try:
             data = self.daemon.update_job(req["id"], req)
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_delete_job(self, req):
         try:
             self.daemon.delete_job(req["job_id"])
             self._send(ok=True)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_toggle_job(self, req):
         try:
             data = self.daemon.toggle_job(req["job_id"])
             self._send(ok=True, data=data)
-        except Exception as e:
-            self._send(ok=False, error=str(e))
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
