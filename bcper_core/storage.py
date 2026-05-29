@@ -92,7 +92,7 @@ class RcloneStore(BackupStore):
         try:
             result = subprocess.run(
                 [self._rclone, "copyto", tmp_path, remote_path],
-                capture_output=True,
+                capture_output=True, timeout=300,
             )
             if result.returncode != 0:
                 err = result.stderr.decode() if result.stderr else "rclone copyto failed"
@@ -111,7 +111,7 @@ class RcloneStore(BackupStore):
         try:
             result = subprocess.run(
                 [self._rclone, "copyto", remote_path, tmp_path],
-                capture_output=True,
+                capture_output=True, timeout=300,
             )
             if result.returncode != 0:
                 err = result.stderr.decode() if result.stderr else "rclone copyto failed"
@@ -130,7 +130,7 @@ class RcloneStore(BackupStore):
         _storage_logger.info(f"RcloneStore list_backups {remote_path}")
         result = subprocess.run(
             [self._rclone, "lsf", remote_path],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
             _storage_logger.warning(f"RcloneStore list_backups failed: {result.stderr}")
@@ -146,7 +146,7 @@ class RcloneStore(BackupStore):
     def delete(self, name: str) -> None:
         remote_path = self._remote_path(name)
         _storage_logger.info(f"RcloneStore delete {name} -> {remote_path}")
-        result = subprocess.run([self._rclone, "delete", remote_path], capture_output=True)
+        result = subprocess.run([self._rclone, "delete", remote_path], capture_output=True, timeout=120)
         if result.returncode != 0:
             err = result.stderr.decode() if result.stderr else f"rclone delete exited {result.returncode}"
             _storage_logger.error(f"RcloneStore delete FAILED {name}: {err}")
@@ -157,7 +157,7 @@ class RcloneStore(BackupStore):
             _storage_logger.info(f"RcloneStore delete sidecar {sidecar}")
             result = subprocess.run(
                 [self._rclone, "delete", sidecar],
-                capture_output=True,
+                capture_output=True, timeout=120,
             )
             if result.returncode != 0:
                 _storage_logger.debug(f"RcloneStore sidecar {ext} not found or delete failed (ok)")
@@ -168,7 +168,7 @@ class RcloneStore(BackupStore):
         remote_path = self._remote_path(name)
         result = subprocess.run(
             [self._rclone, "lsf", remote_path],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=120,
         )
         exists = result.returncode == 0 and result.stdout.strip() != ""
         _storage_logger.debug(f"RcloneStore exists {name} = {exists}")

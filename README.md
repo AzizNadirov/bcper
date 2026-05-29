@@ -1,5 +1,7 @@
 # BCPER
 
+![BCPER Logo](bcper/gui/assets/logo_xlarge.gif)
+
 Lightweight desktop backup manager with a background daemon worker.
 
 ## Features

@@ -15,10 +15,10 @@ class VaultsTab(tk.Frame):
         toolbar = tk.Frame(self, bg="#ecf0f1")
         toolbar.pack(fill="x", pady=(0, 8))
         ttk.Button(toolbar, text="➕ Add", command=self._add).pack(side="left", padx=(8, 4), pady=6)
-        ttk.Button(toolbar, text="✏️ Edit", command=self._edit).pack(side="left", padx=(0, 4), pady=6)
-        ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="Edit", command=self._edit).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
         ttk.Button(toolbar, text="💾 Backup Now", command=self._backup).pack(side="left", padx=(0, 4), pady=6)
-        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
+        ttk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("name", "items", "enc", "ignores")

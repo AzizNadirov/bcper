@@ -3,7 +3,7 @@ import subprocess
 import sys
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, PhotoImage
 
 from ..client import Client
 from .common import _ui_queue, run_async
@@ -23,22 +23,42 @@ class App(tk.Tk):
         self.geometry("960x640")
         self.client = Client()
 
+        # Load logos (keep reference to prevent GC)
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        self._logo_img = None
+        self._logo_large = None
+        try:
+            logo_path = os.path.join(assets_dir, "logo.gif")
+            if os.path.exists(logo_path):
+                self._logo_img = PhotoImage(file=logo_path)
+            logo_large_path = os.path.join(assets_dir, "logo_large.gif")
+            if os.path.exists(logo_large_path):
+                self._logo_large = PhotoImage(file=logo_large_path)
+        except Exception:
+            pass
+
         # Header
         header = tk.Frame(self, bg="#2c3e50", height=48)
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
-        tk.Label(header, text=" BCPER ", bg="#2c3e50", fg="#ecf0f1",
-                 font=("Helvetica", 16, "bold")).pack(side="left", padx=16, pady=8)
+        if self._logo_img:
+            tk.Label(header, image=self._logo_img, bg="#2c3e50").pack(side="left", padx=(12, 4))
+        tk.Label(header, text="BCPER", bg="#2c3e50", fg="#ecf0f1",
+                 font=("Helvetica", 16, "bold")).pack(side="left", padx=(4, 4), pady=8)
         tk.Label(header, text="Backup Manager", bg="#2c3e50", fg="#bdc3c7",
                  font=("Helvetica", 10)).pack(side="left", pady=8)
+
+        # Window icon
+        if self._logo_img:
+            self.iconphoto(False, self._logo_img)
 
         # Daemon status banner (hidden when daemon is running)
         self._daemon_banner = tk.Frame(self, bg="#e74c3c", height=36)
         self._daemon_banner.pack(fill="x", side="top")
         self._daemon_banner.pack_propagate(False)
-        tk.Label(self._daemon_banner, text="⚠ Daemon is not running — some features are unavailable",
+        tk.Label(self._daemon_banner, text="Daemon is not running — some features are unavailable",
                  bg="#e74c3c", fg="#ffffff", font=("Helvetica", 10, "bold")).pack(side="left", padx=12, pady=6)
-        ttk.Button(self._daemon_banner, text="▶ Start Daemon", command=self._start_daemon).pack(side="right", padx=12, pady=4)
+        ttk.Button(self._daemon_banner, text="Start Daemon", command=self._start_daemon).pack(side="right", padx=12, pady=4)
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=12, pady=(4, 12))

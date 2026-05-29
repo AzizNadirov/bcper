@@ -19,9 +19,9 @@ class BackupsTab(tk.Frame):
         self.store_combo = ttk.Combobox(top, textvariable=self.store_var, state="readonly", width=30)
         self.store_combo.pack(side="left", padx=(0, 8), pady=6)
         self.store_combo.bind("<<ComboboxSelected>>", lambda e: self._load_backups())
-        ttk.Button(top, text="🔄 Refresh", command=self._load_backups).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(top, text="Refresh", command=self._load_backups).pack(side="left", padx=(0, 4), pady=6)
         ttk.Button(top, text="📥 Restore", command=self._restore).pack(side="left", padx=(0, 4), pady=6)
-        ttk.Button(top, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(top, text="Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("archive",)
