@@ -194,7 +194,7 @@ class ItemsTab(tk.Frame):
         dlg = tk.Toplevel(self)
         dlg.title("Select Store")
         dlg.transient(self)
-        dlg.grab_set()
+        dlg.after_idle(dlg.grab_set)
         var = tk.StringVar(value=stores[0])
         ttk.Combobox(dlg, values=stores, textvariable=var, state="readonly").pack(padx=12, pady=12)
         result = None
@@ -221,7 +221,7 @@ class ItemDialog(tk.Toplevel):
         self.callback = callback
         self.title("Edit Backup Item" if item else "New Backup Item")
         self.transient(master)
-        self.grab_set()
+        self.after_idle(self.grab_set)
         self.minsize(500, 400)
         self._build()
         if item:
@@ -422,7 +422,7 @@ class VaultsTab(tk.Frame):
         dlg = tk.Toplevel(self)
         dlg.title("Select Store")
         dlg.transient(self)
-        dlg.grab_set()
+        dlg.after_idle(dlg.grab_set)
         var = tk.StringVar(value=stores[0])
         ttk.Combobox(dlg, values=stores, textvariable=var, state="readonly").pack(padx=12, pady=12)
         result = None
@@ -443,7 +443,7 @@ class VaultDialog(tk.Toplevel):
         self.callback = callback
         self.title("Edit Vault" if vault else "New Vault")
         self.transient(master)
-        self.grab_set()
+        self.after_idle(self.grab_set)
         self.minsize(520, 480)
         self._build()
         if vault:
@@ -634,7 +634,7 @@ class StoresTab(tk.Frame):
         dlg = tk.Toplevel(self)
         dlg.title("Add Local Store")
         dlg.transient(self)
-        dlg.grab_set()
+        dlg.after_idle(dlg.grab_set)
         tk.Label(dlg, text="Name:").grid(row=0, column=0, sticky="w", padx=8, pady=4)
         name_var = tk.StringVar()
         tk.Entry(dlg, textvariable=name_var).grid(row=0, column=1, sticky="ew", padx=8, pady=4)
@@ -651,7 +651,7 @@ class StoresTab(tk.Frame):
         dlg = tk.Toplevel(self)
         dlg.title("Add Rclone Store")
         dlg.transient(self)
-        dlg.grab_set()
+        dlg.after_idle(dlg.grab_set)
         tk.Label(dlg, text="Name:").grid(row=0, column=0, sticky="w", padx=8, pady=4)
         name_var = tk.StringVar()
         tk.Entry(dlg, textvariable=name_var).grid(row=0, column=1, sticky="ew", padx=8, pady=4)
@@ -678,7 +678,7 @@ class StoresTab(tk.Frame):
         dlg = tk.Toplevel(self)
         dlg.title("Add Google Drive Store")
         dlg.transient(self)
-        dlg.grab_set()
+        dlg.after_idle(dlg.grab_set)
 
         tk.Label(dlg, text="Name:").grid(row=0, column=0, sticky="w", padx=8, pady=4)
         name_var = tk.StringVar(value="gdrive")
@@ -894,7 +894,7 @@ class JobDialog(tk.Toplevel):
         self.callback = callback
         self.title("Add Job")
         self.transient(master)
-        self.grab_set()
+        self.after_idle(self.grab_set)
         self._build()
         self._load_data()
         tk.Button(self, text="Save", command=self._save).pack(pady=12)
