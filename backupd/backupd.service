@@ -1,0 +1,13 @@
+[Unit]
+Description=backupd — periodic cloud backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/backupd.sh --config %h/.config/backupd/backupd.conf
+StandardOutput=append:%h/.local/share/backupd/backupd.log
+StandardError=append:%h/.local/share/backupd/backupd.log
+# Prevent runaway processes
+TimeoutStartSec=1h
+KillMode=process
