@@ -123,6 +123,7 @@ class ItemsTab(tk.Frame):
         self.tree.column("enc", width=80, anchor="center")
         self.tree.column("ignores", width=80, anchor="center")
         self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Double-1>", lambda e: self._edit())
 
         sb = ttk.Scrollbar(self.tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -346,6 +347,7 @@ class VaultsTab(tk.Frame):
         self.tree.column("enc", width=80, anchor="center")
         self.tree.column("ignores", width=80, anchor="center")
         self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Double-1>", lambda e: self._edit())
 
         sb = ttk.Scrollbar(self.tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -737,6 +739,7 @@ class BackupsTab(tk.Frame):
         self.tree.heading("archive", text="Archive")
         self.tree.column("archive", width=800)
         self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Double-1>", lambda e: self._restore())
 
         sb = ttk.Scrollbar(self.tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -837,6 +840,7 @@ class JobsTab(tk.Frame):
         self.tree.column("next", width=160)
         self.tree.column("enabled", width=80, anchor="center")
         self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Double-1>", lambda e: self._toggle())
 
         sb = ttk.Scrollbar(self.tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
