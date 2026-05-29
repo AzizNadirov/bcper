@@ -3,7 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-build-deb
+build-deb/
+*.deb
 
 # Virtual environments
 .env
