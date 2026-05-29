@@ -155,11 +155,6 @@ class ItemsTab(tk.Frame):
         key = self._selected()
         if not key:
             return
-        data = None
-        for child in self.tree.get_children():
-            if self.tree.item(child, "iid") == key:
-                # fetch from server to get full data
-                break
         run_async(lambda: self.client.list_items(), lambda r, e: self._open_edit(r, e, key))
 
     def _open_edit(self, resp, err, key):
