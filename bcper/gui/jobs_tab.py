@@ -88,7 +88,7 @@ class JobsTab(tk.Frame):
             _gui_logger.warning("GUI JobsTab _run: no job selected")
             return
         _gui_logger.info(f"GUI JobsTab _run: calling client.run_job({jid})")
-        run_async(lambda: self.client.run_job(jid), self._on_run)
+        run_async(lambda path: self.client.run_job(jid, progress_file=path), self._on_run, master=self, progress_text="Running job...")
 
     def _on_run(self, resp, err):
         _gui_logger.info(f"GUI JobsTab _on_run resp_type={type(resp)} err={err}")

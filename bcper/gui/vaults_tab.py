@@ -88,7 +88,7 @@ class VaultsTab(tk.Frame):
         store = self._pick_store()
         if not store:
             return
-        run_async(lambda: self.client.backup("vault", name, store), self._on_backup)
+        run_async(lambda path: self.client.backup("vault", name, store, progress_file=path), self._on_backup, master=self, progress_text="Running backup...")
 
     def _on_backup(self, resp, err):
         if err:

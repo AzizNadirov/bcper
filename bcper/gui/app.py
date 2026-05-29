@@ -61,7 +61,7 @@ class App(tk.Tk):
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
         self._poll_queue()
-        self._daemon_banner_visible = False
+        self._daemon_banner_visible = True  # banner is packed at startup
         self.after(200, self._check_daemon_loop)
 
     def _poll_queue(self):

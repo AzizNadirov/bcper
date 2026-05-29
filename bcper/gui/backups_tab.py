@@ -86,8 +86,10 @@ class BackupsTab(tk.Frame):
                 return
             password = pw
         run_async(
-            lambda: self.client.restore(archive, store, password=password, target_dir=target),
+            lambda path: self.client.restore(archive, store, password=password, target_dir=target, progress_file=path),
             self._on_restore,
+            master=self,
+            progress_text="Restoring...",
         )
 
     def _on_restore(self, resp, err):
@@ -109,4 +111,4 @@ class BackupsTab(tk.Frame):
             return
         store = self.store_var.get()
         if messagebox.askyesno("Delete", f"Delete '{archive}' from store '{store}'?"):
-            run_async(lambda: self.client.delete_backup(archive, store), lambda r, e: self._load_backups() if not e else None)
+            run_async(lambda _: self.client.delete_backup(archive, store), lambda r, e: self._load_backups() if not e else None, master=self, progress_text="Deleting...")

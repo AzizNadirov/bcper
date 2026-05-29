@@ -101,6 +101,7 @@ class IPCProtocol(asyncio.Protocol):
                 req["target_type"],
                 req["target_name"],
                 req["store_name"],
+                req.get("progress_file"),
             )
             self._send(ok=True, data=result)
         except UserError as e:
@@ -118,6 +119,7 @@ class IPCProtocol(asyncio.Protocol):
                 req["store_name"],
                 req.get("password"),
                 req.get("target_dir"),
+                req.get("progress_file"),
             )
             self._send(ok=True, data=result)
         except UserError as e:
@@ -255,6 +257,7 @@ class IPCProtocol(asyncio.Protocol):
                 None,
                 self.daemon.run_job,
                 req["job_id"],
+                req.get("progress_file"),
             )
             self.daemon.logger.info(f"SERVER _cmd_run_job success: {result}")
             self._send(ok=True, data=result)

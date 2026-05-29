@@ -89,7 +89,7 @@ class ItemsTab(tk.Frame):
         store = self._pick_store()
         if not store:
             return
-        run_async(lambda: self.client.backup("item", key, store), self._on_backup_result)
+        run_async(lambda path: self.client.backup("item", key, store, progress_file=path), self._on_backup_result, master=self, progress_text="Running backup...")
 
     def _pick_store(self):
         resp = self.client.list_stores()

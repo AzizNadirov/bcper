@@ -137,21 +137,23 @@ class Daemon:
             if trigger.should_run(job.last_run, job.next_run):
                 self._executor.submit(self._run_job, job)
 
-    def run_job(self, job_id: str) -> dict:
-        self.logger.info(f"DAEMON run_job called id={job_id}")
+    def run_job(self, job_id: str, progress_file: str = None) -> dict:
+        self.logger.info(f"DAEMON run_job called id={job_id} progress_file={progress_file}")
         with self.config_lock:
             job = self.config.jobs.get(job_id)
             if not job:
                 self.logger.error(f"DAEMON run_job: job {job_id} not found")
                 raise ValueError("Job not found")
             self.logger.info(f"DAEMON run_job: found job {job_id} target={job.target_type}/{job.target_name} store={job.store_name}")
-        return self._run_job(job)
+        return self._run_job(job, progress_file)
 
-    def _run_job(self, job: Job) -> dict:
+    def _run_job(self, job: Job, progress_file: str = None) -> dict:
         self.logger.info(f"DAEMON _run_job START {job.id}: {job.target_type}/{job.target_name} -> {job.store_name}")
         try:
             self.logger.info(f"DAEMON _run_job calling backup engine")
-            result = self.run_backup(job.target_type, job.target_name, job.store_name)
+            from bcper_core.progress import make_progress_callback
+            progress = make_progress_callback(progress_file)
+            result = self.run_backup(job.target_type, job.target_name, job.store_name, progress_file=progress_file)
             self.logger.info(f"DAEMON _run_job SUCCESS {job.id}: archive={result.get('archive')}")
         except Exception as e:
             self.logger.error(f"DAEMON _run_job FAILED {job.id}: {e}")
@@ -185,24 +187,28 @@ class Daemon:
         else:
             raise ValueError(f"Invalid target type: {target_type}")
 
-    def run_backup(self, target_type: str, target_name: str, store_name: str) -> dict:
-        self.logger.info(f"BACKUP {target_type}/{target_name} → {store_name}")
+    def run_backup(self, target_type: str, target_name: str, store_name: str, progress_file: str = None) -> dict:
+        self.logger.info(f"BACKUP {target_type}/{target_name} → {store_name} progress_file={progress_file}")
         store_cfg = self.config.stores.get(store_name)
         if not store_cfg:
             raise RuntimeError(f"Store not found: {store_name}")
         store = create_store(store_cfg)
         target = self._resolve_target(target_type, target_name)
-        result = self.engine.backup(target, store)
+        from bcper_core.progress import make_progress_callback
+        progress = make_progress_callback(progress_file)
+        result = self.engine.backup(target, store, progress=progress)
         self.logger.info(f"BACKUP done archive={result.get('archive')}")
         return result
 
-    def run_restore(self, archive_name: str, store_name: str, password: str = None, target_dir: str = None) -> dict:
-        self.logger.info(f"RESTORE {archive_name} from {store_name}")
+    def run_restore(self, archive_name: str, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None) -> dict:
+        self.logger.info(f"RESTORE {archive_name} from {store_name} progress_file={progress_file}")
         store_cfg = self.config.stores.get(store_name)
         if not store_cfg:
             raise RuntimeError(f"Store not found: {store_name}")
         store = create_store(store_cfg)
-        result = self.engine.restore(archive_name, store, password=password, target_dir=target_dir)
+        from bcper_core.progress import make_progress_callback
+        progress = make_progress_callback(progress_file)
+        result = self.engine.restore(archive_name, store, password=password, target_dir=target_dir, progress=progress)
         self.logger.info(f"RESTORE done target={result.get('target_dir')}")
         return result
 

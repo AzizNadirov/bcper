@@ -4,7 +4,7 @@ import tarfile
 import hashlib
 import tempfile
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -23,6 +23,10 @@ from .models import (
     BCVaultTarget,
 )
 from .ignore import IgnoreMatcher, effective_ignores
+
+
+def _noop_progress(step: str):
+    pass
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
@@ -61,24 +65,27 @@ def sha256_bytes(data: bytes) -> str:
 
 
 class TarGzBackupEngine(BackupEngine):
-    def backup(self, target: BackupTarget, store: BackupStore, timestamp: str = None) -> dict:
+    def backup(self, target: BackupTarget, store: BackupStore, timestamp: str = None, progress: Callable[[str], None] = None) -> dict:
+        if progress is None:
+            progress = _noop_progress
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         if isinstance(target, BCItemTarget):
-            return self._backup_item(target, store, timestamp)
+            return self._backup_item(target, store, timestamp, progress)
         elif isinstance(target, BCVaultTarget):
-            return self._backup_vault(target, store, timestamp)
+            return self._backup_vault(target, store, timestamp, progress)
         else:
             raise ValueError(f"Unsupported target type: {type(target)}")
 
-    def _backup_item(self, target: BCItemTarget, store: BackupStore, timestamp: str) -> dict:
+    def _backup_item(self, target: BCItemTarget, store: BackupStore, timestamp: str, progress: Callable[[str], None]) -> dict:
         archive_name = f"{target.name}_{timestamp}.tar.gz"
         meta_name = f"{target.name}_{timestamp}.meta.json"
         hash_name = f"{target.name}_{timestamp}.sha256"
 
         matcher = IgnoreMatcher(target.get_ignore_patterns())
 
+        progress("Collecting files...")
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
             with tarfile.open(tmp_path, "w:gz") as tar:
@@ -88,17 +95,21 @@ class TarGzBackupEngine(BackupEngine):
                     self._add_path(tar, path, matcher, arcbase="")
 
         try:
+            progress("Reading archive...")
             with open(tmp_path, "rb") as f:
                 archive_data = f.read()
 
+            progress("Computing hash...")
             original_hash = sha256_bytes(archive_data)
             password = target.get_password()
             encrypted = bool(password)
 
             if encrypted:
+                progress("Encrypting...")
                 archive_data = encrypt_data(archive_data, password)
                 archive_name += ".enc"
 
+            progress("Saving to store...")
             store.save(archive_name, archive_data)
             store.save(hash_name, original_hash.encode())
 
@@ -112,6 +123,7 @@ class TarGzBackupEngine(BackupEngine):
             }
             store.save(meta_name, json.dumps(meta, indent=2).encode())
 
+            progress("Done")
             return {
                 "success": True,
                 "archive": archive_name,
@@ -121,13 +133,14 @@ class TarGzBackupEngine(BackupEngine):
         finally:
             os.unlink(tmp_path)
 
-    def _backup_vault(self, target: BCVaultTarget, store: BackupStore, timestamp: str) -> dict:
+    def _backup_vault(self, target: BCVaultTarget, store: BackupStore, timestamp: str, progress: Callable[[str], None]) -> dict:
         archive_name = f"{target.name}_{timestamp}.tar.gz"
         meta_name = f"{target.name}_{timestamp}.meta.json"
         hash_name = f"{target.name}_{timestamp}.sha256"
 
         item_targets = target.get_item_targets()
 
+        progress("Collecting files...")
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
             with tarfile.open(tmp_path, "w:gz") as tar:
@@ -140,17 +153,21 @@ class TarGzBackupEngine(BackupEngine):
                         self._add_path(tar, path, matcher, arcbase=it.name)
 
         try:
+            progress("Reading archive...")
             with open(tmp_path, "rb") as f:
                 archive_data = f.read()
 
+            progress("Computing hash...")
             original_hash = sha256_bytes(archive_data)
             password = target.get_password()
             encrypted = bool(password)
 
             if encrypted:
+                progress("Encrypting...")
                 archive_data = encrypt_data(archive_data, password)
                 archive_name += ".enc"
 
+            progress("Saving to store...")
             store.save(archive_name, archive_data)
             store.save(hash_name, original_hash.encode())
 
@@ -164,6 +181,7 @@ class TarGzBackupEngine(BackupEngine):
             }
             store.save(meta_name, json.dumps(meta, indent=2).encode())
 
+            progress("Done")
             return {
                 "success": True,
                 "archive": archive_name,
@@ -202,18 +220,24 @@ class TarGzBackupEngine(BackupEngine):
             arc = os.path.join(arcbase, basename).replace("\\", "/") if arcbase else basename
             tar.add(path, arcname=arc)
 
-    def restore(self, archive_name: str, store: BackupStore, password: str = None, target_dir: str = None) -> dict:
+    def restore(self, archive_name: str, store: BackupStore, password: str = None, target_dir: str = None, progress: Callable[[str], None] = None) -> dict:
+        if progress is None:
+            progress = _noop_progress
+
+        progress("Loading from store...")
         archive_data = store.load(archive_name)
         encrypted = archive_name.endswith(".enc")
 
         if encrypted:
             if not password:
                 raise ValueError("Password required for encrypted backup")
+            progress("Decrypting...")
             archive_data = decrypt_data(archive_data, password)
 
         hash_name = archive_name.replace(".enc", "") + ".sha256"
         warnings = []
         if store.exists(hash_name):
+            progress("Verifying hash...")
             expected_hash = store.load(hash_name).decode().strip()
             actual_hash = sha256_bytes(archive_data)
             if expected_hash != actual_hash:
@@ -223,6 +247,7 @@ class TarGzBackupEngine(BackupEngine):
             target_dir = os.getcwd()
         os.makedirs(target_dir, exist_ok=True)
 
+        progress("Extracting...")
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp.write(archive_data)
             tmp.flush()
@@ -234,6 +259,7 @@ class TarGzBackupEngine(BackupEngine):
         finally:
             os.unlink(tmp_path)
 
+        progress("Done")
         return {
             "success": True,
             "warnings": warnings,

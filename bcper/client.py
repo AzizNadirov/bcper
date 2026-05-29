@@ -78,11 +78,11 @@ class Client:
     def list_backups(self, store_name: str):
         return self._call("LIST_BACKUPS", store_name=store_name)
 
-    def backup(self, target_type: str, target_name: str, store_name: str):
-        return self._call("BACKUP", target_type=target_type, target_name=target_name, store_name=store_name)
+    def backup(self, target_type: str, target_name: str, store_name: str, progress_file: str = None):
+        return self._call("BACKUP", target_type=target_type, target_name=target_name, store_name=store_name, progress_file=progress_file)
 
-    def restore(self, archive: str, store_name: str, password: str = None, target_dir: str = None):
-        return self._call("RESTORE", archive=archive, store_name=store_name, password=password, target_dir=target_dir)
+    def restore(self, archive: str, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None):
+        return self._call("RESTORE", archive=archive, store_name=store_name, password=password, target_dir=target_dir, progress_file=progress_file)
 
     def delete_backup(self, archive: str, store_name: str):
         return self._call("DELETE_BACKUP", archive=archive, store_name=store_name)
@@ -129,8 +129,8 @@ class Client:
     def delete_job(self, job_id: str):
         return self._call("DELETE_JOB", job_id=job_id)
 
-    def run_job(self, job_id: str):
-        return self._call("RUN_JOB", job_id=job_id)
+    def run_job(self, job_id: str, progress_file: str = None):
+        return self._call("RUN_JOB", job_id=job_id, progress_file=progress_file)
 
     def toggle_job(self, job_id: str):
         return self._call("TOGGLE_JOB", job_id=job_id)
