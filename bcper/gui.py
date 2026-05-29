@@ -916,28 +916,31 @@ class FrequencyDialog(tk.Toplevel):
         f = tk.Frame(self)
         f.pack(padx=12, pady=12, fill="both", expand=True)
 
-        tk.Label(f, text="ID:").grid(row=0, column=0, sticky="w")
-        self.id_var = tk.StringVar()
-        tk.Entry(f, textvariable=self.id_var).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
-
-        tk.Label(f, text="Name:").grid(row=1, column=0, sticky="w")
+        tk.Label(f, text="Name:").grid(row=0, column=0, sticky="w")
         self.name_var = tk.StringVar()
-        tk.Entry(f, textvariable=self.name_var).grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
+        tk.Entry(f, textvariable=self.name_var).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
 
-        tk.Label(f, text="Type:").grid(row=2, column=0, sticky="w")
+        tk.Label(f, text="Type:").grid(row=1, column=0, sticky="w")
         self.type_var = tk.StringVar(value="once")
-        ttk.Combobox(f, values=["once", "hourly", "daily"], textvariable=self.type_var, state="readonly").grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
+        ttk.Combobox(f, values=["once", "hourly", "daily"], textvariable=self.type_var, state="readonly").grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
 
-        tk.Label(f, text="Interval:").grid(row=3, column=0, sticky="w")
+        tk.Label(f, text="Interval:").grid(row=2, column=0, sticky="w")
         self.interval_var = tk.StringVar(value="1")
-        tk.Spinbox(f, from_=1, to=365, textvariable=self.interval_var).grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=2)
+        tk.Spinbox(f, from_=1, to=365, textvariable=self.interval_var).grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
 
         f.columnconfigure(1, weight=1)
 
+    @staticmethod
+    def _slugify(name: str) -> str:
+        import re
+        s = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+        return s or "freq"
+
     def _save(self):
+        name = self.name_var.get().strip()
         data = {
-            "id": self.id_var.get().strip(),
-            "name": self.name_var.get().strip(),
+            "id": self._slugify(name),
+            "name": name,
             "period_type": self.type_var.get(),
             "interval": int(self.interval_var.get()),
         }
