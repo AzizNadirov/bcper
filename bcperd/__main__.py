@@ -1,5 +1,10 @@
 from .daemon import Daemon
 
-if __name__ == "__main__":
+
+def main():
     daemon = Daemon()
     daemon.start()
+
+
+if __name__ == "__main__":
+    main()

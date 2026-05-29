@@ -16,11 +16,13 @@ Lightweight desktop backup manager with a background daemon worker.
 
 ## Install
 
+Uses [uv](https://docs.astral.sh/uv/).
+
 ```bash
-pip3 install -r requirements.txt
+uv sync
 ```
 
-On Debian/Ubuntu you may need:
+On Debian/Ubuntu you may need Tkinter for the GUI:
 
 ```bash
 sudo apt-get install python3-tk
@@ -31,13 +33,25 @@ sudo apt-get install python3-tk
 ### Start the daemon
 
 ```bash
-python3 -m bcperd
+uv run bcperd
+```
+
+Or:
+
+```bash
+uv run python -m bcperd
 ```
 
 ### Open the GUI
 
 ```bash
-python3 -m bcper
+uv run bcper
+```
+
+Or:
+
+```bash
+uv run python -m bcper
 ```
 
 ### Quick CLI smoke test

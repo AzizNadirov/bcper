@@ -1,0 +1,16 @@
+[project]
+name = "bcper"
+version = "0.1.0"
+description = "Lightweight desktop backup manager with daemon and Tkinter GUI"
+requires-python = ">=3.8"
+dependencies = [
+    "cryptography>=3.0.0",
+]
+
+[project.scripts]
+bcperd = "bcperd.__main__:main"
+bcper = "bcper.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
