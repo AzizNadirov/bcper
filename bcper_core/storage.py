@@ -1,9 +1,10 @@
 import os
-import shutil
 import subprocess
 import tempfile
 from abc import ABC, abstractmethod
 from typing import List
+
+from .rclone_helper import get_rclone_path, run_rclone, ensure_rclone
 
 
 class BackupStore(ABC):
@@ -72,8 +73,7 @@ class RcloneStore(BackupStore):
     def __init__(self, remote: str, path: str = ""):
         self.remote = remote
         self.path = path
-        if shutil.which("rclone") is None:
-            raise RuntimeError("rclone not found in PATH")
+        self._rclone = ensure_rclone()
 
     def _remote_path(self, name: str) -> str:
         return f"{self.remote}:{os.path.join(self.path, name)}"
@@ -86,7 +86,7 @@ class RcloneStore(BackupStore):
             tmp_path = tmp.name
         try:
             subprocess.run(
-                ["rclone", "copyto", tmp_path, remote_path],
+                [self._rclone, "copyto", tmp_path, remote_path],
                 check=True, capture_output=True,
             )
         finally:
@@ -99,7 +99,7 @@ class RcloneStore(BackupStore):
             tmp_path = tmp.name
         try:
             subprocess.run(
-                ["rclone", "copyto", remote_path, tmp_path],
+                [self._rclone, "copyto", remote_path, tmp_path],
                 check=True, capture_output=True,
             )
             with open(tmp_path, "rb") as f:
@@ -111,7 +111,7 @@ class RcloneStore(BackupStore):
     def list_backups(self) -> List[str]:
         remote_path = self._remote_path("")
         result = subprocess.run(
-            ["rclone", "lsf", remote_path],
+            [self._rclone, "lsf", remote_path],
             capture_output=True, text=True, check=True,
         )
         files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
@@ -122,28 +122,23 @@ class RcloneStore(BackupStore):
 
     def delete(self, name: str) -> None:
         remote_path = self._remote_path(name)
-        subprocess.run(["rclone", "delete", remote_path], check=True, capture_output=True)
+        subprocess.run([self._rclone, "delete", remote_path], check=True, capture_output=True)
         for ext in (".sha256", ".meta.json"):
             subprocess.run(
-                ["rclone", "delete", remote_path + ext],
+                [self._rclone, "delete", remote_path + ext],
                 check=True, capture_output=True,
             )
 
     def exists(self, name: str) -> bool:
         result = subprocess.run(
-            ["rclone", "lsf", self._remote_path(name)],
+            [self._rclone, "lsf", self._remote_path(name)],
             capture_output=True, text=True,
         )
         return result.returncode == 0 and result.stdout.strip() != ""
 
 
 def list_rclone_remotes() -> List[str]:
-    if shutil.which("rclone") is None:
-        raise RuntimeError("rclone not found in PATH")
-    result = subprocess.run(
-        ["rclone", "listremotes"],
-        capture_output=True, text=True,
-    )
+    result = run_rclone("listremotes")
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())
     return [

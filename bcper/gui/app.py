@@ -100,6 +100,7 @@ class App(tk.Tk):
                 # PID exists — try to ping it
                 try:
                     self.client.ping()
+                    self._hide_daemon_banner()
                     messagebox.showinfo("Daemon", f"Daemon already running (PID {old_pid}).")
                     return
                 except Exception:
@@ -127,8 +128,14 @@ class App(tk.Tk):
         for _ in range(10):
             time.sleep(0.3)
             if self._daemon_alive():
+                self._hide_daemon_banner()
                 return
         messagebox.showerror("Daemon", "Failed to start daemon.")
+
+    def _hide_daemon_banner(self):
+        if self._daemon_banner_visible:
+            self._daemon_banner.pack_forget()
+            self._daemon_banner_visible = False
 
     def _on_tab_change(self, event):
         tab = event.widget.nametowidget(event.widget.select())

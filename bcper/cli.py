@@ -80,6 +80,11 @@ def cmd_store_delete(args):
     print(f"Deleted store: {args.name}")
 
 
+def cmd_store_rclone_config(args):
+    from bcper_core.rclone_helper import open_rclone_config
+    open_rclone_config()
+
+
 def cmd_freq_list(args):
     client = Client()
     data = _ok(client.list_frequencies())
@@ -197,6 +202,8 @@ def main():
     # frequency
     freq_p = sub.add_parser("frequency", help="Manage frequencies")
     freq_sub = freq_p.add_subparsers(dest="freq_cmd")
+    store_sub.add_parser("rclone-config", help="Launch rclone config in a terminal")
+
     freq_sub.add_parser("list", help="List frequencies")
     p = freq_sub.add_parser("add", help="Add frequency")
     p.add_argument("id")
@@ -255,6 +262,8 @@ def main():
             cmd_store_add(args)
         elif args.store_cmd == "delete":
             cmd_store_delete(args)
+        elif args.store_cmd == "rclone-config":
+            cmd_store_rclone_config(args)
     elif args.command == "frequency":
         if args.freq_cmd == "list":
             cmd_freq_list(args)

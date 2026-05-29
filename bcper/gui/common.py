@@ -31,6 +31,10 @@ def run_async(func, callback):
                 _ui_queue.put(lambda: callback(None, err))
             else:
                 _ui_queue.put(lambda: callback(result, None))
+        except OSError as e:
+            # Daemon socket missing or broken — expected when daemon is down
+            _gui_logger.debug(f"Async OSError: {e}")
+            _ui_queue.put(lambda: callback(None, str(e)))
         except Exception as e:
             _gui_logger.warning(f"Async exception: {e}")
             _ui_queue.put(lambda: callback(None, str(e)))
