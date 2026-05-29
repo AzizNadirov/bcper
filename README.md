@@ -14,11 +14,12 @@ Lightweight desktop backup manager with a background daemon worker.
 - **Encryption** - AES-256-GCM with PBKDF2 password derivation.
 - **Integrity** - SHA-256 checksums stored alongside archives; warnings on mismatch.
 - **Storage** - local directory or remote via rclone (auto-downloaded if not in PATH).
-- **Desktop GUI** - Tkinter-based configuration and control panel.
+- **Desktop GUI** - Tkinter-based configuration and control panel with loading indicators for remote operations.
 - **Daemon** - background scheduler and worker process with Unix-socket IPC.
 - **Progress tracking** - live step text during backup, restore, delete, and manual job runs.
+- **Shell integration** - one-click setup of aliases in `.bashrc` or `.zshrc`.
 
-## Install
+## Install from source
 
 Uses [uv](https://docs.astral.sh/uv/).
 
@@ -32,15 +33,30 @@ On Debian/Ubuntu you may need Tkinter for the GUI:
 sudo apt-get install python3-tk
 ```
 
+## Build Debian package
+
+A `build-deb.sh` script is included to produce a `.deb` package without extra tooling:
+
+```bash
+./build-deb.sh
+```
+
+This creates `bcper_0.1.0_all.deb`, which can be installed with:
+
+```bash
+sudo dpkg -i bcper_0.1.0_all.deb
+sudo apt-get install -f   # if dependencies are missing
+```
+
 ## Usage
 
 ### Start the daemon
 
 ```bash
-uv run bcperd
+python3 -m bcperd
 ```
 
-Or:
+Or from source with uv:
 
 ```bash
 uv run python -m bcperd
@@ -51,10 +67,10 @@ The daemon writes its PID to `~/.config/bcper/daemon.pid` and listens on a Unix 
 ### Open the GUI
 
 ```bash
-uv run bcper
+python3 -m bcper
 ```
 
-Or:
+Or from source with uv:
 
 ```bash
 uv run python -m bcper
@@ -118,8 +134,24 @@ Create backup jobs that link a target (item or vault), a store, and a frequency.
 
 Double-click a job to edit it. Excess backups are automatically deleted after each successful run.
 
+### Backups
+Browse archives in a selected store. Remote stores show a loading indicator while the list is being fetched. Double-click an archive to restore it.
+
 ### Status
-View daemon status and recent activity.
+View daemon status, recent log output, start the daemon, or add shell integration aliases to `.bashrc` / `.zshrc`.
+
+## Shell Integration
+
+Open the GUI and go to the **Status** tab, then click **Shell Integration**. Choose `.bashrc` and/or `.zshrc` and click **Apply**. This adds:
+
+```bash
+export PYTHONPATH="/path/to/bcper:$PYTHONPATH"
+alias bcper='python3 -m bcper'
+alias bcperd='python3 -m bcperd'
+alias bcper-cli='python3 -m bcper.cli'
+```
+
+The dialog detects existing entries and skips duplicates.
 
 ## Google Drive Setup
 
@@ -159,8 +191,8 @@ Stored at `~/.config/bcper/config.json`:
 
 ## Error Handling
 
-Expected errors (wrong password, missing files, etc.) are reported as clean messages without tracebacks. Unexpected bugs are logged with full tracebacks for debugging.
+Expected errors (wrong password, missing files, daemon not running, etc.) are reported as clean messages without tracebacks. Unexpected bugs are logged with full tracebacks for debugging.
 
 ## IPC
 
-The daemon listens on a Unix domain socket at `~/.config/bcper/daemon.sock`. The GUI communicates over this socket using newline-delimited JSON messages. All client socket access is protected by a thread lock.
+The daemon listens on a Unix domain socket at `~/.config/bcper/daemon.sock`. The GUI communicates over this socket using newline-delimited JSON messages. Each client call uses its own socket connection so slow remote operations do not freeze the UI.
