@@ -7,6 +7,12 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
+# Pre-initialize Tcl interpreter to avoid XCB threading crashes on some Linux systems
+try:
+    tk.Tcl().eval("package require Tk")
+except Exception:
+    pass
+
 from .client import Client
 
 _ui_queue = queue.Queue()
