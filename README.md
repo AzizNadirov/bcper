@@ -80,6 +80,27 @@ with tempfile.TemporaryDirectory() as td:
 "
 ```
 
+## Google Drive Setup
+
+BCPER uses **rclone** for Google Drive (and any other cloud storage).
+
+```bash
+# 1. Install rclone
+sudo apt-get install rclone   # or download from https://rclone.org/
+
+# 2. Configure Google Drive
+rclone config
+#   n) New remote
+#   name: gdrive
+#   type: drive
+#   follow the OAuth flow in your browser
+
+# 3. Verify
+rclone lsd gdrive:
+```
+
+Then open the GUI → **Stores** tab → **Add GDrive**.
+
 ## Configuration
 
 Stored at `~/.config/bcper/config.json`:

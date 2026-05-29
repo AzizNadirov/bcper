@@ -473,6 +473,7 @@ class StoresTab(tk.Frame):
         toolbar.pack(fill="x", pady=(0, 6))
         tk.Button(toolbar, text="Add Local", command=self._add_local).pack(side="left", padx=(0, 4))
         tk.Button(toolbar, text="Add Rclone", command=self._add_rclone).pack(side="left", padx=(0, 4))
+        tk.Button(toolbar, text="Add GDrive", command=self._add_gdrive).pack(side="left", padx=(0, 4))
         tk.Button(toolbar, text="Delete", command=self._delete).pack(side="left", padx=(0, 4))
         tk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
 
@@ -542,6 +543,43 @@ class StoresTab(tk.Frame):
             run_async(lambda: self.client.add_store(name=name_var.get(), type="rclone", remote=remote_var.get(), path=path_var.get()),
                       lambda r, e: (dlg.destroy(), self.refresh()) if not e else messagebox.showerror("Error", str(e), parent=dlg))
         tk.Button(dlg, text="Save", command=save).grid(row=3, column=1, sticky="e", padx=8, pady=8)
+        dlg.columnconfigure(1, weight=1)
+
+    def _add_gdrive(self):
+        try:
+            from bcper_core.storage import list_rclone_remotes
+            remotes = list_rclone_remotes()
+        except Exception as e:
+            messagebox.showerror("rclone", f"rclone error: {e}\n\nInstall rclone and run:\n  rclone config", parent=self)
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Add Google Drive Store")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        tk.Label(dlg, text="Name:").grid(row=0, column=0, sticky="w", padx=8, pady=4)
+        name_var = tk.StringVar(value="gdrive")
+        tk.Entry(dlg, textvariable=name_var).grid(row=0, column=1, sticky="ew", padx=8, pady=4)
+
+        tk.Label(dlg, text="Remote:").grid(row=1, column=0, sticky="w", padx=8, pady=4)
+        remote_var = tk.StringVar(value="gdrive")
+        if remotes:
+            ttk.Combobox(dlg, values=remotes, textvariable=remote_var, state="readonly").grid(row=1, column=1, sticky="ew", padx=8, pady=4)
+        else:
+            tk.Entry(dlg, textvariable=remote_var).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
+            tk.Label(dlg, text="No remotes found. Run 'rclone config' first.", fg="red").grid(row=2, column=0, columnspan=2, padx=8)
+
+        tk.Label(dlg, text="Path (optional):").grid(row=3, column=0, sticky="w", padx=8, pady=4)
+        path_var = tk.StringVar(value="Backups")
+        tk.Entry(dlg, textvariable=path_var).grid(row=3, column=1, sticky="ew", padx=8, pady=4)
+
+        def save():
+            run_async(
+                lambda: self.client.add_store(name=name_var.get(), type="rclone", remote=remote_var.get(), path=path_var.get()),
+                lambda r, e: (dlg.destroy(), self.refresh()) if not e else messagebox.showerror("Error", str(e), parent=dlg),
+            )
+        tk.Button(dlg, text="Save", command=save).grid(row=4, column=1, sticky="e", padx=8, pady=8)
         dlg.columnconfigure(1, weight=1)
 
     def _delete(self):

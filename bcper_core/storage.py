@@ -137,6 +137,22 @@ class RcloneStore(BackupStore):
         return result.returncode == 0 and result.stdout.strip() != ""
 
 
+def list_rclone_remotes() -> List[str]:
+    if shutil.which("rclone") is None:
+        raise RuntimeError("rclone not found in PATH")
+    result = subprocess.run(
+        ["rclone", "listremotes"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip())
+    return [
+        r.strip().rstrip(":")
+        for r in result.stdout.splitlines()
+        if r.strip()
+    ]
+
+
 def create_store(config: dict) -> BackupStore:
     store_type = config.get("type", "local")
     if store_type == "local":
