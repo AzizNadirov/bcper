@@ -50,6 +50,8 @@ sudo apt-get install -f   # if dependencies are missing
 
 ## Usage
 
+![alt text](bcper/gui/assets/image.png)
+
 ### Start the daemon
 
 ```bash
