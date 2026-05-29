@@ -18,7 +18,8 @@ def run_async(func, callback):
             result = func()
             _ui_queue.put(lambda: callback(result, None))
         except Exception as e:
-            _ui_queue.put(lambda: callback(None, str(e)))
+            err = str(e)
+            _ui_queue.put(lambda: callback(None, err))
     threading.Thread(target=wrapper, daemon=True).start()
 
 
