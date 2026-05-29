@@ -54,6 +54,9 @@ class Client:
     def list_stores(self):
         return self._call("LIST_STORES")
 
+    def list_frequencies(self):
+        return self._call("LIST_FREQUENCIES")
+
     def list_jobs(self):
         return self._call("LIST_JOBS")
 
@@ -93,8 +96,20 @@ class Client:
     def delete_store(self, name: str):
         return self._call("DELETE_STORE", name=name)
 
+    def add_frequency(self, **data):
+        return self._call("ADD_FREQUENCY", **data)
+
+    def update_frequency(self, id: str, **data):
+        return self._call("UPDATE_FREQUENCY", id=id, **data)
+
+    def delete_frequency(self, id: str):
+        return self._call("DELETE_FREQUENCY", id=id)
+
     def add_job(self, **data):
         return self._call("ADD_JOB", **data)
+
+    def update_job(self, id: str, **data):
+        return self._call("UPDATE_JOB", id=id, **data)
 
     def delete_job(self, job_id: str):
         return self._call("DELETE_JOB", job_id=job_id)

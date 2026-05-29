@@ -59,6 +59,10 @@ class IPCProtocol(asyncio.Protocol):
     async def _cmd_list_stores(self, req):
         self._send(ok=True, data=self.daemon.config.stores)
 
+    async def _cmd_list_frequencies(self, req):
+        data = [f.to_dict() for f in self.daemon.config.frequencies.values()]
+        self._send(ok=True, data=data)
+
     async def _cmd_list_jobs(self, req):
         data = [j.to_dict() for j in self.daemon.config.jobs.values()]
         self._send(ok=True, data=data)
@@ -187,9 +191,41 @@ class IPCProtocol(asyncio.Protocol):
         except Exception as e:
             self._send(ok=False, error=str(e))
 
+    # ---- Frequencies ----
+
+    async def _cmd_add_frequency(self, req):
+        try:
+            data = self.daemon.add_frequency(req)
+            self._send(ok=True, data=data)
+        except Exception as e:
+            self._send(ok=False, error=str(e))
+
+    async def _cmd_update_frequency(self, req):
+        try:
+            data = self.daemon.update_frequency(req["id"], req)
+            self._send(ok=True, data=data)
+        except Exception as e:
+            self._send(ok=False, error=str(e))
+
+    async def _cmd_delete_frequency(self, req):
+        try:
+            self.daemon.delete_frequency(req["id"])
+            self._send(ok=True)
+        except Exception as e:
+            self._send(ok=False, error=str(e))
+
+    # ---- Jobs ----
+
     async def _cmd_add_job(self, req):
         try:
             data = self.daemon.add_job(req)
+            self._send(ok=True, data=data)
+        except Exception as e:
+            self._send(ok=False, error=str(e))
+
+    async def _cmd_update_job(self, req):
+        try:
+            data = self.daemon.update_job(req["id"], req)
             self._send(ok=True, data=data)
         except Exception as e:
             self._send(ok=False, error=str(e))

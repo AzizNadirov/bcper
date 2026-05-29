@@ -1,7 +1,7 @@
-import hashlib
 import json
 import os
 import tarfile
+import hashlib
 import tempfile
 from datetime import datetime
 from typing import List, Optional
@@ -10,8 +10,13 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 
-from .models import BCItem, BCVault
-from .storage import BackupStore
+from .models import (
+    BackupEngine,
+    BackupStore,
+    BackupTarget,
+    BCItemTarget,
+    BCVaultTarget,
+)
 from .ignore import IgnoreMatcher, effective_ignores
 
 
@@ -47,21 +52,29 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-class BackupEngine:
-    def backup_item(self, item: BCItem, store: BackupStore, timestamp: str = None) -> dict:
+class TarGzBackupEngine(BackupEngine):
+    def backup(self, target: BackupTarget, store: BackupStore, timestamp: str = None) -> dict:
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        archive_name = f"{item.key}_{timestamp}.tar.gz"
-        meta_name = f"{item.key}_{timestamp}.meta.json"
-        hash_name = f"{item.key}_{timestamp}.sha256"
+        if isinstance(target, BCItemTarget):
+            return self._backup_item(target, store, timestamp)
+        elif isinstance(target, BCVaultTarget):
+            return self._backup_vault(target, store, timestamp)
+        else:
+            raise ValueError(f"Unsupported target type: {type(target)}")
 
-        matcher = IgnoreMatcher(item.bcpignore)
+    def _backup_item(self, target: BCItemTarget, store: BackupStore, timestamp: str) -> dict:
+        archive_name = f"{target.name}_{timestamp}.tar.gz"
+        meta_name = f"{target.name}_{timestamp}.meta.json"
+        hash_name = f"{target.name}_{timestamp}.sha256"
+
+        matcher = IgnoreMatcher(target.get_ignore_patterns())
 
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
             with tarfile.open(tmp_path, "w:gz") as tar:
-                for path in item.paths:
+                for path in target.get_paths():
                     if not os.path.exists(path):
                         continue
                     self._add_path(tar, path, matcher, arcbase="")
@@ -71,19 +84,20 @@ class BackupEngine:
                 archive_data = f.read()
 
             original_hash = sha256_bytes(archive_data)
-            encrypted = bool(item.password)
+            password = target.get_password()
+            encrypted = bool(password)
 
             if encrypted:
-                archive_data = encrypt_data(archive_data, item.password)
+                archive_data = encrypt_data(archive_data, password)
                 archive_name += ".enc"
 
             store.save(archive_name, archive_data)
             store.save(hash_name, original_hash.encode())
 
             meta = {
-                "key": item.key,
+                "key": target.name,
                 "timestamp": timestamp,
-                "paths": item.paths,
+                "paths": target.get_paths(),
                 "encrypted": encrypted,
                 "hash": original_hash,
                 "archive_name": archive_name,
@@ -99,31 +113,30 @@ class BackupEngine:
         finally:
             os.unlink(tmp_path)
 
-    def backup_vault(self, vault: BCVault, items: List[BCItem], store: BackupStore, timestamp: str = None) -> dict:
-        if timestamp is None:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    def _backup_vault(self, target: BCVaultTarget, store: BackupStore, timestamp: str) -> dict:
+        archive_name = f"{target.name}_{timestamp}.tar.gz"
+        meta_name = f"{target.name}_{timestamp}.meta.json"
+        hash_name = f"{target.name}_{timestamp}.sha256"
 
-        archive_name = f"{vault.name}_{timestamp}.tar.gz"
-        meta_name = f"{vault.name}_{timestamp}.meta.json"
-        hash_name = f"{vault.name}_{timestamp}.sha256"
+        item_targets = target.get_item_targets()
 
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
             with tarfile.open(tmp_path, "w:gz") as tar:
-                for item in items:
-                    ignores = effective_ignores(vault.bcpignore, item.bcpignore)
+                for it in item_targets:
+                    ignores = effective_ignores(target.get_ignore_patterns(), it.get_ignore_patterns())
                     matcher = IgnoreMatcher(ignores)
-                    for path in item.paths:
+                    for path in it.get_paths():
                         if not os.path.exists(path):
                             continue
-                        self._add_path(tar, path, matcher, arcbase=item.key)
+                        self._add_path(tar, path, matcher, arcbase=it.name)
 
         try:
             with open(tmp_path, "rb") as f:
                 archive_data = f.read()
 
             original_hash = sha256_bytes(archive_data)
-            password = vault.password
+            password = target.get_password()
             encrypted = bool(password)
 
             if encrypted:
@@ -134,9 +147,9 @@ class BackupEngine:
             store.save(hash_name, original_hash.encode())
 
             meta = {
-                "vault": vault.name,
+                "vault": target.name,
                 "timestamp": timestamp,
-                "items": [item.key for item in items],
+                "items": [it.name for it in item_targets],
                 "encrypted": encrypted,
                 "hash": original_hash,
                 "archive_name": archive_name,
@@ -163,7 +176,6 @@ class BackupEngine:
                 if rel_root == ".":
                     rel_root = ""
 
-                # Filter directories
                 kept_dirs = []
                 for d in dirs:
                     rel = os.path.join(rel_root, d).replace("\\", "/") if rel_root else d
@@ -171,7 +183,6 @@ class BackupEngine:
                         kept_dirs.append(d)
                 dirs[:] = kept_dirs
 
-                # Add files
                 for f in files:
                     rel = os.path.join(rel_root, f).replace("\\", "/") if rel_root else f
                     if matcher.is_ignored(rel, is_dir=False):

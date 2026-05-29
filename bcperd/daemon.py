@@ -6,11 +6,19 @@ import sys
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from bcper_core.config import Config
-from bcper_core.engine import BackupEngine
-from bcper_core.models import BCItem, BCVault, BackupJob, RunPeriod
+from bcper_core.engine import TarGzBackupEngine
+from bcper_core.models import (
+    BCItem,
+    BCVault,
+    Job,
+    JobFrequency,
+    BCItemTarget,
+    BCVaultTarget,
+    JobFrequencyTrigger,
+)
 from bcper_core.storage import create_store
 
 
@@ -20,7 +28,7 @@ class Daemon:
 
     def __init__(self):
         self.config = Config()
-        self.engine = BackupEngine()
+        self.engine = TarGzBackupEngine()
         self.config_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._scheduler_thread = None
@@ -72,8 +80,8 @@ class Daemon:
     async def _async_main(self):
         if os.path.exists(self.SOCKET_PATH):
             os.unlink(self.SOCKET_PATH)
-        from .server import IPCProtocol
         loop = asyncio.get_event_loop()
+        from .server import IPCProtocol
         server = await loop.create_unix_server(
             lambda: IPCProtocol(self), self.SOCKET_PATH
         )
@@ -96,13 +104,14 @@ class Daemon:
         for job in jobs:
             if not job.enabled:
                 continue
-            if job.period.period_type == "once" and job.last_run:
+            freq = self.config.frequencies.get(job.frequency_id)
+            if not freq:
                 continue
-            next_run = datetime.fromisoformat(job.next_run) if job.next_run else now
-            if next_run <= now:
+            trigger = JobFrequencyTrigger(freq)
+            if trigger.should_run(job.last_run, job.next_run):
                 self._executor.submit(self._run_job, job)
 
-    def _run_job(self, job: BackupJob):
+    def _run_job(self, job: Job):
         self.logger.info(f"Running job {job.id}: {job.target_type}/{job.target_name}")
         try:
             result = self.run_backup(job.target_type, job.target_name, job.store_name)
@@ -112,38 +121,36 @@ class Daemon:
         finally:
             with self.config_lock:
                 job.last_run = datetime.now().isoformat()
-                job.next_run = self._calc_next_run(job.period, job.last_run)
+                freq = self.config.frequencies.get(job.frequency_id)
+                if freq:
+                    trigger = JobFrequencyTrigger(freq)
+                    job.next_run = trigger.calculate_next_run(job.last_run)
                 self.config.save()
 
-    def _calc_next_run(self, period: RunPeriod, last_run_iso: str) -> str:
-        last_run = datetime.fromisoformat(last_run_iso)
-        if period.period_type == "hourly":
-            return (last_run + timedelta(hours=period.interval)).isoformat()
-        elif period.period_type == "daily":
-            return (last_run + timedelta(days=period.interval)).isoformat()
-        return None
-
     # ---- Operations ----
+
+    def _resolve_target(self, target_type: str, target_name: str) -> object:
+        if target_type == "item":
+            item = self.config.items.get(target_name)
+            if not item:
+                raise RuntimeError(f"Item not found: {target_name}")
+            return BCItemTarget(item)
+        elif target_type == "vault":
+            vault = self.config.vaults.get(target_name)
+            if not vault:
+                raise RuntimeError(f"Vault not found: {target_name}")
+            items = {k: self.config.items[k] for k in vault.item_keys if k in self.config.items}
+            return BCVaultTarget(vault, items)
+        else:
+            raise ValueError(f"Invalid target type: {target_type}")
 
     def run_backup(self, target_type: str, target_name: str, store_name: str) -> dict:
         store_cfg = self.config.stores.get(store_name)
         if not store_cfg:
             raise RuntimeError(f"Store not found: {store_name}")
         store = create_store(store_cfg)
-
-        if target_type == "item":
-            item = self.config.items.get(target_name)
-            if not item:
-                raise RuntimeError(f"Item not found: {target_name}")
-            return self.engine.backup_item(item, store)
-        elif target_type == "vault":
-            vault = self.config.vaults.get(target_name)
-            if not vault:
-                raise RuntimeError(f"Vault not found: {target_name}")
-            items = [self.config.items[k] for k in vault.item_keys if k in self.config.items]
-            return self.engine.backup_vault(vault, items, store)
-        else:
-            raise ValueError(f"Invalid target type: {target_type}")
+        target = self._resolve_target(target_type, target_name)
+        return self.engine.backup(target, store)
 
     def run_restore(self, archive_name: str, store_name: str, password: str = None, target_dir: str = None) -> dict:
         store_cfg = self.config.stores.get(store_name)
@@ -152,7 +159,7 @@ class Daemon:
         store = create_store(store_cfg)
         return self.engine.restore(archive_name, store, password=password, target_dir=target_dir)
 
-    # ---- Config CRUD helpers (called from server thread) ----
+    # ---- Config CRUD helpers ----
 
     def add_item(self, data: dict) -> dict:
         key = data.get("key", "").strip()
@@ -249,22 +256,79 @@ class Daemon:
                 del self.config.stores[name]
                 self.config.save()
 
+    # ---- Frequencies ----
+
+    def add_frequency(self, data: dict) -> dict:
+        freq_id = data.get("id", "").strip() or str(uuid.uuid4())[:8]
+        with self.config_lock:
+            if freq_id in self.config.frequencies:
+                raise ValueError("Frequency already exists")
+            freq = JobFrequency(
+                id=freq_id,
+                name=data.get("name", "").strip(),
+                period_type=data.get("period_type", "once"),
+                interval=int(data.get("interval", 1)),
+            )
+            self.config.frequencies[freq_id] = freq
+            self.config.save()
+        return freq.to_dict()
+
+    def update_frequency(self, freq_id: str, data: dict) -> dict:
+        with self.config_lock:
+            if freq_id not in self.config.frequencies:
+                raise ValueError("Frequency not found")
+            freq = self.config.frequencies[freq_id]
+            freq.name = data.get("name", freq.name).strip()
+            freq.period_type = data.get("period_type", freq.period_type)
+            freq.interval = int(data.get("interval", freq.interval))
+            self.config.save()
+        return freq.to_dict()
+
+    def delete_frequency(self, freq_id: str):
+        with self.config_lock:
+            if freq_id in self.config.frequencies:
+                # Remove from jobs that use this frequency
+                for job in list(self.config.jobs.values()):
+                    if job.frequency_id == freq_id:
+                        del self.config.jobs[job.id]
+                del self.config.frequencies[freq_id]
+                self.config.save()
+
+    # ---- Jobs ----
+
     def add_job(self, data: dict) -> dict:
         job_id = str(uuid.uuid4())[:8]
-        period = RunPeriod(
-            period_type=data.get("period_type", "once"),
-            interval=int(data.get("interval", 1)),
-        )
-        job = BackupJob(
+        freq_id = data.get("frequency_id")
+        if not freq_id or freq_id not in self.config.frequencies:
+            raise ValueError("Frequency not found")
+        job = Job(
             id=job_id,
+            name=data.get("name", "").strip() or f"job_{job_id}",
             target_type=data.get("target_type"),
             target_name=data.get("target_name"),
             store_name=data.get("store_name"),
-            period=period,
+            frequency_id=freq_id,
             next_run=datetime.now().isoformat(),
         )
         with self.config_lock:
             self.config.jobs[job_id] = job
+            self.config.save()
+        return job.to_dict()
+
+    def update_job(self, job_id: str, data: dict) -> dict:
+        with self.config_lock:
+            if job_id not in self.config.jobs:
+                raise ValueError("Job not found")
+            job = self.config.jobs[job_id]
+            job.name = data.get("name", job.name).strip()
+            job.target_type = data.get("target_type", job.target_type)
+            job.target_name = data.get("target_name", job.target_name)
+            job.store_name = data.get("store_name", job.store_name)
+            if "frequency_id" in data:
+                if data["frequency_id"] not in self.config.frequencies:
+                    raise ValueError("Frequency not found")
+                job.frequency_id = data["frequency_id"]
+            job.enabled = data.get("enabled", job.enabled)
             self.config.save()
         return job.to_dict()
 

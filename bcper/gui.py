@@ -46,6 +46,7 @@ class App(tk.Tk):
         self.vaults_tab = VaultsTab(self.notebook, self.client)
         self.stores_tab = StoresTab(self.notebook, self.client)
         self.backups_tab = BackupsTab(self.notebook, self.client)
+        self.frequencies_tab = FrequenciesTab(self.notebook, self.client)
         self.jobs_tab = JobsTab(self.notebook, self.client)
         self.status_tab = StatusTab(self.notebook, self.client)
 
@@ -53,6 +54,7 @@ class App(tk.Tk):
         self.notebook.add(self.vaults_tab, text="  Vaults  ")
         self.notebook.add(self.stores_tab, text="  Stores  ")
         self.notebook.add(self.backups_tab, text="  Backups  ")
+        self.notebook.add(self.frequencies_tab, text="  Frequencies  ")
         self.notebook.add(self.jobs_tab, text="  Jobs  ")
         self.notebook.add(self.status_tab, text="  Status  ")
 
@@ -818,6 +820,118 @@ class BackupsTab(tk.Frame):
             run_async(lambda: self.client.delete_backup(archive, store), lambda r, e: self._load_backups() if not e else None)
 
 
+# ---- Frequencies Tab ----
+
+class FrequenciesTab(tk.Frame):
+    def __init__(self, master, client):
+        super().__init__(master)
+        self.client = client
+        self._build_ui()
+        self.refresh()
+
+    def _build_ui(self):
+        toolbar = tk.Frame(self, bg="#ecf0f1")
+        toolbar.pack(fill="x", pady=(0, 8))
+        ttk.Button(toolbar, text="➕ Add", command=self._add).pack(side="left", padx=(8, 4), pady=6)
+        ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
+
+        cols = ("id", "name", "type", "interval")
+        self.tree = ttk.Treeview(self, columns=cols, show="headings")
+        self.tree.heading("id", text="ID")
+        self.tree.heading("name", text="Name")
+        self.tree.heading("type", text="Type")
+        self.tree.heading("interval", text="Interval")
+        self.tree.column("id", width=100)
+        self.tree.column("name", width=200)
+        self.tree.column("type", width=100)
+        self.tree.column("interval", width=80, anchor="center")
+        self.tree.pack(fill="both", expand=True)
+
+        sb = ttk.Scrollbar(self.tree, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+
+    def refresh(self):
+        self.tree.delete(*self.tree.get_children())
+        run_async(self.client.list_frequencies, self._on_refresh)
+
+    def _on_refresh(self, resp, err):
+        if err:
+            return
+        for f in resp.get("data", []):
+            self.tree.insert("", "end", values=(
+                f["id"], f["name"], f["period_type"], f["interval"]
+            ), iid=f["id"])
+
+    def _selected(self):
+        sel = self.tree.selection()
+        return sel[0] if sel else None
+
+    def _add(self):
+        FrequencyDialog(self, self.client, callback=self.refresh)
+
+    def _delete(self):
+        fid = self._selected()
+        if not fid:
+            return
+        if messagebox.askyesno("Delete", f"Delete frequency '{fid}'?\n\nJobs using this frequency will also be removed."):
+            run_async(lambda: self.client.delete_frequency(fid), lambda r, e: self.refresh() if not e else None)
+
+
+class FrequencyDialog(tk.Toplevel):
+    def __init__(self, master, client, callback=None):
+        super().__init__(master)
+        self.client = client
+        self.callback = callback
+        self.title("Add Frequency")
+        self.transient(master)
+        self.wait_visibility()
+        self.grab_set()
+        self._build()
+        tk.Button(self, text="Save", command=self._save).pack(pady=12)
+
+    def _build(self):
+        f = tk.Frame(self)
+        f.pack(padx=12, pady=12, fill="both", expand=True)
+
+        tk.Label(f, text="ID:").grid(row=0, column=0, sticky="w")
+        self.id_var = tk.StringVar()
+        tk.Entry(f, textvariable=self.id_var).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
+
+        tk.Label(f, text="Name:").grid(row=1, column=0, sticky="w")
+        self.name_var = tk.StringVar()
+        tk.Entry(f, textvariable=self.name_var).grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
+
+        tk.Label(f, text="Type:").grid(row=2, column=0, sticky="w")
+        self.type_var = tk.StringVar(value="once")
+        ttk.Combobox(f, values=["once", "hourly", "daily"], textvariable=self.type_var, state="readonly").grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
+
+        tk.Label(f, text="Interval:").grid(row=3, column=0, sticky="w")
+        self.interval_var = tk.StringVar(value="1")
+        tk.Spinbox(f, from_=1, to=365, textvariable=self.interval_var).grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=2)
+
+        f.columnconfigure(1, weight=1)
+
+    def _save(self):
+        data = {
+            "id": self.id_var.get().strip(),
+            "name": self.name_var.get().strip(),
+            "period_type": self.type_var.get(),
+            "interval": int(self.interval_var.get()),
+        }
+        run_async(lambda: self.client.add_frequency(**data), self._on_save)
+
+    def _on_save(self, resp, err):
+        if err:
+            messagebox.showerror("Error", str(err), parent=self)
+        else:
+            self.destroy()
+            if self.callback:
+                self.callback()
+
+
 # ---- Jobs Tab ----
 
 class JobsTab(tk.Frame):
@@ -836,18 +950,20 @@ class JobsTab(tk.Frame):
         ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
-        cols = ("target", "store", "period", "next", "enabled")
+        cols = ("name", "target", "store", "freq", "next", "enabled")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
+        self.tree.heading("name", text="Name")
         self.tree.heading("target", text="Target")
         self.tree.heading("store", text="Store")
-        self.tree.heading("period", text="Period")
+        self.tree.heading("freq", text="Frequency")
         self.tree.heading("next", text="Next Run")
         self.tree.heading("enabled", text="Enabled")
-        self.tree.column("target", width=200)
-        self.tree.column("store", width=120)
-        self.tree.column("period", width=100)
-        self.tree.column("next", width=160)
-        self.tree.column("enabled", width=80, anchor="center")
+        self.tree.column("name", width=120)
+        self.tree.column("target", width=160)
+        self.tree.column("store", width=100)
+        self.tree.column("freq", width=100)
+        self.tree.column("next", width=140)
+        self.tree.column("enabled", width=70, anchor="center")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Double-1>", lambda e: self._toggle())
 
@@ -863,14 +979,11 @@ class JobsTab(tk.Frame):
         if err:
             return
         for j in resp.get("data", []):
-            p = j.get("period", {})
-            period_str = p.get("period_type", "once")
-            if period_str != "once":
-                period_str += f" ({p.get('interval', 1)})"
             self.tree.insert("", "end", values=(
+                j.get("name", j["id"]),
                 f"{j['target_type']}:{j['target_name']}",
                 j["store_name"],
-                period_str,
+                j.get("frequency_id", ""),
                 j.get("next_run", "")[:19].replace("T", " "),
                 "Yes" if j.get("enabled") else "No",
             ), iid=j["id"])
@@ -913,33 +1026,35 @@ class JobDialog(tk.Toplevel):
         f = tk.Frame(self)
         f.pack(padx=12, pady=12, fill="both", expand=True)
 
-        tk.Label(f, text="Target Type:").grid(row=0, column=0, sticky="w")
+        tk.Label(f, text="Name:").grid(row=0, column=0, sticky="w")
+        self.name_var = tk.StringVar()
+        tk.Entry(f, textvariable=self.name_var).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
+
+        tk.Label(f, text="Target Type:").grid(row=1, column=0, sticky="w")
         self.type_var = tk.StringVar(value="item")
-        ttk.Combobox(f, values=["item", "vault"], textvariable=self.type_var, state="readonly").grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
+        ttk.Combobox(f, values=["item", "vault"], textvariable=self.type_var, state="readonly").grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
         self.type_var.trace_add("write", lambda *a: self._update_targets())
 
-        tk.Label(f, text="Target:").grid(row=1, column=0, sticky="w")
+        tk.Label(f, text="Target:").grid(row=2, column=0, sticky="w")
         self.target_var = tk.StringVar()
         self.target_combo = ttk.Combobox(f, textvariable=self.target_var, state="readonly")
-        self.target_combo.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
+        self.target_combo.grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
 
-        tk.Label(f, text="Store:").grid(row=2, column=0, sticky="w")
+        tk.Label(f, text="Store:").grid(row=3, column=0, sticky="w")
         self.store_var = tk.StringVar()
         self.store_combo = ttk.Combobox(f, textvariable=self.store_var, state="readonly")
-        self.store_combo.grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
+        self.store_combo.grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=2)
 
-        tk.Label(f, text="Period:").grid(row=3, column=0, sticky="w")
-        self.period_var = tk.StringVar(value="once")
-        ttk.Combobox(f, values=["once", "hourly", "daily"], textvariable=self.period_var, state="readonly").grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=2)
-
-        tk.Label(f, text="Interval:").grid(row=4, column=0, sticky="w")
-        self.interval_var = tk.StringVar(value="1")
-        tk.Spinbox(f, from_=1, to=365, textvariable=self.interval_var).grid(row=4, column=1, sticky="ew", padx=(6, 0), pady=2)
+        tk.Label(f, text="Frequency:").grid(row=4, column=0, sticky="w")
+        self.freq_var = tk.StringVar()
+        self.freq_combo = ttk.Combobox(f, textvariable=self.freq_var, state="readonly")
+        self.freq_combo.grid(row=4, column=1, sticky="ew", padx=(6, 0), pady=2)
 
         f.columnconfigure(1, weight=1)
 
     def _load_data(self):
         run_async(self.client.list_stores, self._on_stores)
+        run_async(self.client.list_frequencies, self._on_frequencies)
         self._update_targets()
 
     def _on_stores(self, resp, err):
@@ -949,6 +1064,14 @@ class JobDialog(tk.Toplevel):
         self.store_combo["values"] = names
         if names:
             self.store_var.set(names[0])
+
+    def _on_frequencies(self, resp, err):
+        if err:
+            return
+        freqs = resp.get("data", [])
+        self.freq_combo["values"] = [f["id"] for f in freqs]
+        if freqs:
+            self.freq_var.set(freqs[0]["id"])
 
     def _update_targets(self):
         if self.type_var.get() == "item":
@@ -966,11 +1089,11 @@ class JobDialog(tk.Toplevel):
 
     def _save(self):
         data = {
+            "name": self.name_var.get().strip(),
             "target_type": self.type_var.get(),
             "target_name": self.target_var.get(),
             "store_name": self.store_var.get(),
-            "period_type": self.period_var.get(),
-            "interval": int(self.interval_var.get()),
+            "frequency_id": self.freq_var.get(),
         }
         run_async(lambda: self.client.add_job(**data), self._on_save)
 
