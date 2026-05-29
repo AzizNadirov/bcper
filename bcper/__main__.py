@@ -1,12 +1,4 @@
-import sys
-
-# Pre-initialize Tcl to avoid XCB threading crashes on some Linux systems
-if sys.platform.startswith("linux"):
-    try:
-        import tkinter
-        tkinter.Tcl().eval("package require Tk")
-    except Exception:
-        pass
+import tkinter  # noqa: F401  -- force early _tkinter / XInitThreads init before threading
 
 from bcper.gui import App
 
