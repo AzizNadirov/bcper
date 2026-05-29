@@ -155,6 +155,7 @@ class Daemon:
             progress = make_progress_callback(progress_file)
             result = self.run_backup(job.target_type, job.target_name, job.store_name, progress_file=progress_file)
             self.logger.info(f"DAEMON _run_job SUCCESS {job.id}: archive={result.get('archive')}")
+            self._apply_retention(job)
         except Exception as e:
             self.logger.error(f"DAEMON _run_job FAILED {job.id}: {e}")
             raise
@@ -169,6 +170,29 @@ class Daemon:
                 self.config.save()
                 self.logger.info(f"DAEMON _run_job config saved for {job.id}")
         return result
+
+    def _apply_retention(self, job: Job):
+        keep = job.keep_last
+        if keep <= 0:
+            return
+        store_cfg = self.config.stores.get(job.store_name)
+        if not store_cfg:
+            return
+        self.logger.info(f"DAEMON retention check for {job.target_name}: keep_last={keep}")
+        try:
+            store = create_store(store_cfg)
+            all_files = store.list_backups()
+            prefix = f"{job.target_name}_"
+            archives = [f for f in all_files if f.startswith(prefix) and f.endswith((".tar.gz", ".tar.gz.enc"))]
+            archives.sort(reverse=True)
+            self.logger.info(f"DAEMON retention found {len(archives)} backups for {job.target_name}")
+            if len(archives) > keep:
+                to_delete = archives[keep:]
+                for name in to_delete:
+                    self.logger.info(f"DAEMON retention deleting old backup: {name}")
+                    store.delete(name)
+        except Exception as e:
+            self.logger.warning(f"DAEMON retention failed for {job.target_name}: {e}")
 
     # ---- Operations ----
 
@@ -338,6 +362,7 @@ class Daemon:
                 name=data.get("name", "").strip(),
                 period_type=data.get("period_type", "once"),
                 interval=int(data.get("interval", 1)),
+                time=data.get("time", "").strip(),
             )
             self.config.frequencies[freq_id] = freq
             self.config.save()
@@ -353,6 +378,8 @@ class Daemon:
             freq.name = data.get("name", freq.name).strip()
             freq.period_type = data.get("period_type", freq.period_type)
             freq.interval = int(data.get("interval", freq.interval))
+            if "time" in data:
+                freq.time = data.get("time", "").strip()
             self.config.save()
             self.logger.info(f"UPDATE_FREQUENCY saved id={freq_id}")
         return freq.to_dict()
@@ -383,6 +410,7 @@ class Daemon:
             target_name=data.get("target_name"),
             store_name=data.get("store_name"),
             frequency_id=freq_id,
+            keep_last=int(data.get("keep_last", 3)),
             next_run=datetime.now().isoformat(),
         )
         with self.config_lock:
@@ -405,6 +433,8 @@ class Daemon:
                 if data["frequency_id"] not in self.config.frequencies:
                     raise ValueError("Frequency not found")
                 job.frequency_id = data["frequency_id"]
+            if "keep_last" in data:
+                job.keep_last = int(data["keep_last"])
             job.enabled = data.get("enabled", job.enabled)
             self.config.save()
             self.logger.info(f"UPDATE_JOB saved id={job_id}")

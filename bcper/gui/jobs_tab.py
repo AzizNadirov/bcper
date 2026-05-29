@@ -22,20 +22,22 @@ class JobsTab(tk.Frame):
         ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
-        cols = ("name", "target", "store", "freq", "next", "enabled")
+        cols = ("name", "target", "store", "freq", "keep", "next", "enabled")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
         self.tree.heading("name", text="Name")
         self.tree.heading("target", text="Target")
         self.tree.heading("store", text="Store")
         self.tree.heading("freq", text="Frequency")
+        self.tree.heading("keep", text="Keep")
         self.tree.heading("next", text="Next Run")
         self.tree.heading("enabled", text="Enabled")
         self.tree.column("name", width=120)
-        self.tree.column("target", width=160)
-        self.tree.column("store", width=100)
-        self.tree.column("freq", width=100)
-        self.tree.column("next", width=140)
-        self.tree.column("enabled", width=70, anchor="center")
+        self.tree.column("target", width=140)
+        self.tree.column("store", width=90)
+        self.tree.column("freq", width=90)
+        self.tree.column("keep", width=50, anchor="center")
+        self.tree.column("next", width=130)
+        self.tree.column("enabled", width=60, anchor="center")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Double-1>", lambda e: self._edit())
 
@@ -56,6 +58,7 @@ class JobsTab(tk.Frame):
                 f"{j['target_type']}:{j['target_name']}",
                 j["store_name"],
                 j.get("frequency_id", ""),
+                j.get("keep_last", 3),
                 j.get("next_run", "")[:19].replace("T", " "),
                 "Yes" if j.get("enabled") else "No",
             ), iid=j["id"])
@@ -159,6 +162,10 @@ class JobDialog(tk.Toplevel):
         self.freq_combo = ttk.Combobox(f, textvariable=self.freq_var, state="readonly")
         self.freq_combo.grid(row=4, column=1, sticky="ew", padx=(6, 0), pady=2)
 
+        tk.Label(f, text="Keep last:").grid(row=5, column=0, sticky="w")
+        self.keep_var = tk.StringVar(value="3")
+        tk.Spinbox(f, from_=1, to=50, textvariable=self.keep_var, width=8).grid(row=5, column=1, sticky="w", padx=(6, 0), pady=2)
+
         f.columnconfigure(1, weight=1)
 
     def _load_data(self):
@@ -171,6 +178,7 @@ class JobDialog(tk.Toplevel):
             self.target_var.set(self.job.get("target_name", ""))
             self.store_var.set(self.job.get("store_name", ""))
             self.freq_var.set(self.job.get("frequency_id", ""))
+            self.keep_var.set(str(self.job.get("keep_last", 3)))
 
     def _on_stores(self, resp, err):
         if err:
@@ -210,6 +218,7 @@ class JobDialog(tk.Toplevel):
             "target_name": self.target_var.get(),
             "store_name": self.store_var.get(),
             "frequency_id": self.freq_var.get(),
+            "keep_last": int(self.keep_var.get() or 3),
         }
         if self.job:
             run_async(lambda: self.client.update_job(self.job["id"], **data), self._on_save)

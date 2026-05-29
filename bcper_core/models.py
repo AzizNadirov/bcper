@@ -63,9 +63,10 @@ class JobFrequency:
     name: str
     period_type: str  # "once", "hourly", "daily"
     interval: int = 1
+    time: str = ""  # e.g. "14:30" for daily at 2:30 PM
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "period_type": self.period_type, "interval": self.interval}
+        return {"id": self.id, "name": self.name, "period_type": self.period_type, "interval": self.interval, "time": self.time}
 
     @classmethod
     def from_dict(cls, d):
@@ -74,6 +75,7 @@ class JobFrequency:
             name=d["name"],
             period_type=d["period_type"],
             interval=d.get("interval", 1),
+            time=d.get("time", ""),
         )
 
 
@@ -85,6 +87,7 @@ class Job:
     target_name: str
     store_name: str
     frequency_id: str
+    keep_last: int = 3
     enabled: bool = True
     last_run: Optional[str] = None
     next_run: Optional[str] = None
@@ -97,6 +100,7 @@ class Job:
             "target_name": self.target_name,
             "store_name": self.store_name,
             "frequency_id": self.frequency_id,
+            "keep_last": self.keep_last,
             "enabled": self.enabled,
             "last_run": self.last_run,
             "next_run": self.next_run,
@@ -111,6 +115,7 @@ class Job:
             target_name=d["target_name"],
             store_name=d["store_name"],
             frequency_id=d["frequency_id"],
+            keep_last=d.get("keep_last", 3),
             enabled=d.get("enabled", True),
             last_run=d.get("last_run"),
             next_run=d.get("next_run"),
@@ -211,10 +216,20 @@ class JobFrequencyTrigger(BackupTrigger):
     def calculate_next_run(self, last_run: str) -> Optional[str]:
         from datetime import datetime, timedelta
         last = datetime.fromisoformat(last_run)
-        if self._frequency.period_type == "hourly":
-            return (last + timedelta(hours=self._frequency.interval)).isoformat()
-        elif self._frequency.period_type == "daily":
-            return (last + timedelta(days=self._frequency.interval)).isoformat()
+        freq = self._frequency
+        if freq.period_type == "hourly":
+            return (last + timedelta(hours=freq.interval)).isoformat()
+        elif freq.period_type == "daily":
+            base = last + timedelta(days=freq.interval)
+            if freq.time:
+                try:
+                    hour, minute = map(int, freq.time.split(":", 1))
+                    base = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if base <= last:
+                        base = base + timedelta(days=freq.interval)
+                except ValueError:
+                    pass
+            return base.isoformat()
         return None
 
 
