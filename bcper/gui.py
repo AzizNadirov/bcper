@@ -30,8 +30,17 @@ class App(tk.Tk):
         self.geometry("960x640")
         self.client = Client()
 
+        # Header
+        header = tk.Frame(self, bg="#2c3e50", height=48)
+        header.pack(fill="x", side="top")
+        header.pack_propagate(False)
+        tk.Label(header, text=" BCPER ", bg="#2c3e50", fg="#ecf0f1",
+                 font=("Helvetica", 16, "bold")).pack(side="left", padx=16, pady=8)
+        tk.Label(header, text="Backup Manager", bg="#2c3e50", fg="#bdc3c7",
+                 font=("Helvetica", 10)).pack(side="left", pady=8)
+
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=(4, 12))
 
         self.items_tab = ItemsTab(self.notebook, self.client)
         self.vaults_tab = VaultsTab(self.notebook, self.client)
@@ -40,16 +49,16 @@ class App(tk.Tk):
         self.jobs_tab = JobsTab(self.notebook, self.client)
         self.status_tab = StatusTab(self.notebook, self.client)
 
-        self.notebook.add(self.items_tab, text="Items")
-        self.notebook.add(self.vaults_tab, text="Vaults")
-        self.notebook.add(self.stores_tab, text="Stores")
-        self.notebook.add(self.backups_tab, text="Backups")
-        self.notebook.add(self.jobs_tab, text="Jobs")
-        self.notebook.add(self.status_tab, text="Status")
+        self.notebook.add(self.items_tab, text="  Items  ")
+        self.notebook.add(self.vaults_tab, text="  Vaults  ")
+        self.notebook.add(self.stores_tab, text="  Stores  ")
+        self.notebook.add(self.backups_tab, text="  Backups  ")
+        self.notebook.add(self.jobs_tab, text="  Jobs  ")
+        self.notebook.add(self.status_tab, text="  Status  ")
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
         self._poll_queue()
-        self._check_daemon()
+        self.after(200, self._check_daemon)
 
     def _poll_queue(self):
         try:
@@ -94,13 +103,14 @@ class ItemsTab(tk.Frame):
         self.refresh()
 
     def _build_ui(self):
-        toolbar = tk.Frame(self)
-        toolbar.pack(fill="x", pady=(0, 6))
-        tk.Button(toolbar, text="Add", command=self._add).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Edit", command=self._edit).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Delete", command=self._delete).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Backup Now", command=self._backup).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
+        toolbar = tk.Frame(self, bg="#ecf0f1")
+        toolbar.pack(fill="x", pady=(0, 8))
+        ttk.Button(toolbar, text="➕ Add", command=self._add).pack(side="left", padx=(8, 4), pady=6)
+        ttk.Button(toolbar, text="✏️ Edit", command=self._edit).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="💾 Backup Now", command=self._backup).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("key", "paths", "enc", "ignores")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
@@ -208,50 +218,92 @@ class ItemsTab(tk.Frame):
 
 
 class ItemDialog(tk.Toplevel):
-    def __init__(self, master, client, item, callback=None):
+    def __init__(self, master, client, item=None, callback=None):
         super().__init__(master)
         self.client = client
         self.item = item
         self.callback = callback
-        self.title("Edit Item" if item else "Add Item")
+        self.title("Edit Backup Item" if item else "New Backup Item")
         self.transient(master)
         self.grab_set()
+        self.minsize(500, 400)
         self._build()
         if item:
             self.key_var.set(item["key"])
             self.key_entry.configure(state="disabled")
-            self.paths_text.insert("1.0", "\n".join(item["paths"]))
+            for p in item["paths"]:
+                self.paths_listbox.insert("end", p)
             if item.get("password"):
                 self.pw_var.set(item["password"])
             self.ignore_text.insert("1.0", "\n".join(item.get("bcpignore", [])))
-        tk.Button(self, text="Save", command=self._save).pack(pady=12)
 
     def _build(self):
-        f = tk.Frame(self)
-        f.pack(padx=12, pady=12, fill="both", expand=True)
+        tk.Label(self, text="Edit Backup Item" if self.item else "New Backup Item",
+                 font=("Helvetica", 14, "bold")).pack(pady=(16, 8))
 
-        tk.Label(f, text="Key:").grid(row=0, column=0, sticky="w")
+        form = tk.Frame(self)
+        form.pack(fill="both", expand=True, padx=20, pady=8)
+
+        # Key
+        tk.Label(form, text="Key:", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w", pady=4)
         self.key_var = tk.StringVar()
-        self.key_entry = tk.Entry(f, textvariable=self.key_var)
-        self.key_entry.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
+        self.key_entry = tk.Entry(form, textvariable=self.key_var, font=("Helvetica", 10))
+        self.key_entry.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=4)
 
-        tk.Label(f, text="Paths (one per line):").grid(row=1, column=0, sticky="nw")
-        self.paths_text = tk.Text(f, width=50, height=4)
-        self.paths_text.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
+        # Paths
+        paths_frame = tk.LabelFrame(form, text=" Backup Paths ", font=("Helvetica", 10, "bold"), padx=8, pady=8)
+        paths_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=10)
+        paths_frame.columnconfigure(0, weight=1)
+        paths_frame.rowconfigure(0, weight=1)
 
-        tk.Label(f, text="Password (optional):").grid(row=2, column=0, sticky="w")
+        self.paths_listbox = tk.Listbox(paths_frame, height=6, selectmode="single", font=("Helvetica", 10))
+        self.paths_listbox.grid(row=0, column=0, rowspan=3, sticky="nsew")
+        sb = ttk.Scrollbar(paths_frame, orient="vertical", command=self.paths_listbox.yview)
+        self.paths_listbox.configure(yscrollcommand=sb.set)
+        sb.grid(row=0, column=1, rowspan=3, sticky="ns")
+
+        tk.Button(paths_frame, text="Add Files...", command=self._add_files).grid(row=0, column=2, padx=(10, 0), sticky="ew")
+        tk.Button(paths_frame, text="Add Folder...", command=self._add_folder).grid(row=1, column=2, padx=(10, 0), pady=6, sticky="ew")
+        tk.Button(paths_frame, text="Remove", command=self._remove_path).grid(row=2, column=2, padx=(10, 0), sticky="ew")
+
+        # Password
+        tk.Label(form, text="Password (optional):", font=("Helvetica", 10, "bold")).grid(row=2, column=0, sticky="w", pady=4)
         self.pw_var = tk.StringVar()
-        tk.Entry(f, textvariable=self.pw_var, show="*").grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
+        tk.Entry(form, textvariable=self.pw_var, show="*", font=("Helvetica", 10)).grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=4)
 
-        tk.Label(f, text="bcpignore (one per line):").grid(row=3, column=0, sticky="nw")
-        self.ignore_text = tk.Text(f, width=50, height=4)
-        self.ignore_text.grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=2)
+        # bcpignore
+        tk.Label(form, text="bcpignore:", font=("Helvetica", 10, "bold")).grid(row=3, column=0, sticky="nw", pady=4)
+        self.ignore_text = tk.Text(form, width=40, height=4, font=("Helvetica", 10))
+        self.ignore_text.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=4)
+        tk.Label(form, text="One pattern per line.  E.g.  *.log   temp/   !keep.txt",
+                 fg="#666", font=("Helvetica", 9)).grid(row=4, column=1, sticky="w", padx=(8, 0))
 
-        f.columnconfigure(1, weight=1)
+        form.columnconfigure(1, weight=1)
+
+        # Buttons
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(fill="x", pady=(0, 16), padx=20)
+        tk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side="right", padx=(8, 0))
+        tk.Button(btn_frame, text="Save", command=self._save).pack(side="right")
+
+    def _add_files(self):
+        files = filedialog.askopenfilenames(parent=self, title="Select files to backup")
+        for f in files:
+            self.paths_listbox.insert("end", f)
+
+    def _add_folder(self):
+        folder = filedialog.askdirectory(parent=self, title="Select folder to backup")
+        if folder:
+            self.paths_listbox.insert("end", folder)
+
+    def _remove_path(self):
+        sel = self.paths_listbox.curselection()
+        if sel:
+            self.paths_listbox.delete(sel[0])
 
     def _save(self):
         key = self.key_var.get().strip()
-        paths = [p.strip() for p in self.paths_text.get("1.0", "end").splitlines() if p.strip()]
+        paths = list(self.paths_listbox.get(0, "end"))
         pw = self.pw_var.get().strip() or None
         ignores = [p.strip() for p in self.ignore_text.get("1.0", "end").splitlines() if p.strip()]
         data = {"key": key, "paths": paths, "password": pw, "bcpignore": ignores}
@@ -279,13 +331,14 @@ class VaultsTab(tk.Frame):
         self.refresh()
 
     def _build_ui(self):
-        toolbar = tk.Frame(self)
-        toolbar.pack(fill="x", pady=(0, 6))
-        tk.Button(toolbar, text="Add", command=self._add).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Edit", command=self._edit).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Delete", command=self._delete).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Backup Now", command=self._backup).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
+        toolbar = tk.Frame(self, bg="#ecf0f1")
+        toolbar.pack(fill="x", pady=(0, 8))
+        ttk.Button(toolbar, text="➕ Add", command=self._add).pack(side="left", padx=(8, 4), pady=6)
+        ttk.Button(toolbar, text="✏️ Edit", command=self._edit).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="💾 Backup Now", command=self._backup).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("name", "items", "enc", "ignores")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
@@ -386,14 +439,15 @@ class VaultsTab(tk.Frame):
 
 
 class VaultDialog(tk.Toplevel):
-    def __init__(self, master, client, vault, callback=None):
+    def __init__(self, master, client, vault=None, callback=None):
         super().__init__(master)
         self.client = client
         self.vault = vault
         self.callback = callback
-        self.title("Edit Vault" if vault else "Add Vault")
+        self.title("Edit Vault" if vault else "New Vault")
         self.transient(master)
         self.grab_set()
+        self.minsize(520, 480)
         self._build()
         if vault:
             self.name_var.set(vault["name"])
@@ -402,30 +456,67 @@ class VaultDialog(tk.Toplevel):
                 self.pw_var.set(vault["password"])
             self.ignore_text.insert("1.0", "\n".join(vault.get("bcpignore", [])))
         self._load_items()
-        tk.Button(self, text="Save", command=self._save).pack(pady=12)
 
     def _build(self):
-        f = tk.Frame(self)
-        f.pack(padx=12, pady=12, fill="both", expand=True)
+        tk.Label(self, text="Edit Vault" if self.vault else "New Vault",
+                 font=("Helvetica", 14, "bold")).pack(pady=(16, 8))
 
-        tk.Label(f, text="Name:").grid(row=0, column=0, sticky="w")
+        form = tk.Frame(self)
+        form.pack(fill="both", expand=True, padx=20, pady=8)
+
+        # Name
+        tk.Label(form, text="Name:", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w", pady=4)
         self.name_var = tk.StringVar()
-        self.name_entry = tk.Entry(f, textvariable=self.name_var)
-        self.name_entry.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=2)
+        self.name_entry = tk.Entry(form, textvariable=self.name_var, font=("Helvetica", 10))
+        self.name_entry.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=4)
 
-        tk.Label(f, text="Password (optional):").grid(row=1, column=0, sticky="w")
+        # Items dual listbox
+        items_frame = tk.LabelFrame(form, text=" Vault Items ", font=("Helvetica", 10, "bold"), padx=8, pady=8)
+        items_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=10)
+        items_frame.columnconfigure(0, weight=1)
+        items_frame.columnconfigure(2, weight=1)
+        items_frame.rowconfigure(1, weight=1)
+
+        tk.Label(items_frame, text="Available", font=("Helvetica", 10, "bold"), fg="#555").grid(row=0, column=0, sticky="w")
+        self.available_list = tk.Listbox(items_frame, height=8, selectmode="extended", font=("Helvetica", 10))
+        self.available_list.grid(row=1, column=0, sticky="nsew")
+        sb1 = ttk.Scrollbar(items_frame, orient="vertical", command=self.available_list.yview)
+        self.available_list.configure(yscrollcommand=sb1.set)
+        sb1.grid(row=1, column=1, sticky="ns")
+
+        btn_col = tk.Frame(items_frame)
+        btn_col.grid(row=1, column=2, padx=8)
+        tk.Button(btn_col, text=">", width=4, command=self._add_items).pack(pady=3)
+        tk.Button(btn_col, text=">>", width=4, command=self._add_all).pack(pady=3)
+        tk.Button(btn_col, text="<", width=4, command=self._remove_items).pack(pady=3)
+        tk.Button(btn_col, text="<<", width=4, command=self._remove_all).pack(pady=3)
+
+        tk.Label(items_frame, text="In Vault", font=("Helvetica", 10, "bold"), fg="#555").grid(row=0, column=3, sticky="w")
+        self.vault_list = tk.Listbox(items_frame, height=8, selectmode="extended", font=("Helvetica", 10))
+        self.vault_list.grid(row=1, column=3, sticky="nsew")
+        sb2 = ttk.Scrollbar(items_frame, orient="vertical", command=self.vault_list.yview)
+        self.vault_list.configure(yscrollcommand=sb2.set)
+        sb2.grid(row=1, column=4, sticky="ns")
+
+        # Password
+        tk.Label(form, text="Password (optional):", font=("Helvetica", 10, "bold")).grid(row=2, column=0, sticky="w", pady=4)
         self.pw_var = tk.StringVar()
-        tk.Entry(f, textvariable=self.pw_var, show="*").grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
+        tk.Entry(form, textvariable=self.pw_var, show="*", font=("Helvetica", 10)).grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=4)
 
-        tk.Label(f, text="Items:").grid(row=2, column=0, sticky="nw")
-        self.items_frame = tk.Frame(f)
-        self.items_frame.grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=2)
+        # bcpignore
+        tk.Label(form, text="bcpignore:", font=("Helvetica", 10, "bold")).grid(row=3, column=0, sticky="nw", pady=4)
+        self.ignore_text = tk.Text(form, width=40, height=4, font=("Helvetica", 10))
+        self.ignore_text.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=4)
+        tk.Label(form, text="One pattern per line.  E.g.  *.log   temp/   !keep.txt",
+                 fg="#666", font=("Helvetica", 9)).grid(row=4, column=1, sticky="w", padx=(8, 0))
 
-        tk.Label(f, text="bcpignore (one per line):").grid(row=3, column=0, sticky="nw")
-        self.ignore_text = tk.Text(f, width=50, height=4)
-        self.ignore_text.grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=2)
+        form.columnconfigure(1, weight=1)
 
-        f.columnconfigure(1, weight=1)
+        # Buttons
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(fill="x", pady=(0, 16), padx=20)
+        tk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side="right", padx=(8, 0))
+        tk.Button(btn_frame, text="Save", command=self._save).pack(side="right")
 
     def _load_items(self):
         run_async(self.client.list_items, self._on_items)
@@ -433,15 +524,48 @@ class VaultDialog(tk.Toplevel):
     def _on_items(self, resp, err):
         if err:
             return
-        self.item_vars = {}
-        for item in resp.get("data", []):
-            var = tk.BooleanVar(value=self.vault and item["key"] in self.vault.get("item_keys", []))
-            self.item_vars[item["key"]] = var
-            tk.Checkbutton(self.items_frame, text=item["key"], variable=var).pack(anchor="w")
+        all_keys = {item["key"] for item in resp.get("data", [])}
+        vault_keys = set(self.vault.get("item_keys", [])) if self.vault else set()
+
+        for key in sorted(all_keys - vault_keys):
+            self.available_list.insert("end", key)
+        for key in sorted(vault_keys):
+            self.vault_list.insert("end", key)
+
+    def _add_items(self):
+        for idx in reversed(self.available_list.curselection()):
+            self.vault_list.insert("end", self.available_list.get(idx))
+            self.available_list.delete(idx)
+        self._sort_list(self.vault_list)
+
+    def _add_all(self):
+        for i in range(self.available_list.size()):
+            self.vault_list.insert("end", self.available_list.get(i))
+        self.available_list.delete(0, "end")
+        self._sort_list(self.vault_list)
+
+    def _remove_items(self):
+        for idx in reversed(self.vault_list.curselection()):
+            self.available_list.insert("end", self.vault_list.get(idx))
+            self.vault_list.delete(idx)
+        self._sort_list(self.available_list)
+
+    def _remove_all(self):
+        for i in range(self.vault_list.size()):
+            self.available_list.insert("end", self.vault_list.get(i))
+        self.vault_list.delete(0, "end")
+        self._sort_list(self.available_list)
+
+    @staticmethod
+    def _sort_list(lb: tk.Listbox):
+        items = sorted(lb.get(0, "end"))
+        lb.delete(0, "end")
+        for item in items:
+            lb.insert("end", item)
 
     def _save(self):
         name = self.name_var.get().strip()
-        keys = [k for k, v in self.item_vars.items() if v.get()]
+        keys = list(self.vault_list.get(0, "end"))
         pw = self.pw_var.get().strip() or None
         ignores = [p.strip() for p in self.ignore_text.get("1.0", "end").splitlines() if p.strip()]
         data = {"name": name, "item_keys": keys, "password": pw, "bcpignore": ignores}
@@ -469,13 +593,14 @@ class StoresTab(tk.Frame):
         self.refresh()
 
     def _build_ui(self):
-        toolbar = tk.Frame(self)
-        toolbar.pack(fill="x", pady=(0, 6))
-        tk.Button(toolbar, text="Add Local", command=self._add_local).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Add Rclone", command=self._add_rclone).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Add GDrive", command=self._add_gdrive).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Delete", command=self._delete).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
+        toolbar = tk.Frame(self, bg="#ecf0f1")
+        toolbar.pack(fill="x", pady=(0, 8))
+        ttk.Button(toolbar, text="📁 Local", command=self._add_local).pack(side="left", padx=(8, 4), pady=6)
+        ttk.Button(toolbar, text="☁️ Rclone", command=self._add_rclone).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="📂 GDrive", command=self._add_gdrive).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("name", "type", "detail")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
@@ -600,16 +725,17 @@ class BackupsTab(tk.Frame):
         self.refresh()
 
     def _build_ui(self):
-        top = tk.Frame(self)
-        top.pack(fill="x", pady=(0, 6))
-        tk.Label(top, text="Store:").pack(side="left")
+        top = tk.Frame(self, bg="#ecf0f1")
+        top.pack(fill="x", pady=(0, 8))
+        tk.Label(top, text="Store:", bg="#ecf0f1", font=("Helvetica", 10, "bold")).pack(side="left", padx=(8, 4), pady=6)
         self.store_var = tk.StringVar()
         self.store_combo = ttk.Combobox(top, textvariable=self.store_var, state="readonly", width=30)
-        self.store_combo.pack(side="left", padx=(4, 8))
+        self.store_combo.pack(side="left", padx=(0, 8), pady=6)
         self.store_combo.bind("<<ComboboxSelected>>", lambda e: self._load_backups())
-        tk.Button(top, text="Refresh", command=self._load_backups).pack(side="left", padx=(0, 4))
-        tk.Button(top, text="Restore", command=self._restore).pack(side="left", padx=(0, 4))
-        tk.Button(top, text="Delete", command=self._delete).pack(side="left", padx=(0, 4))
+        ttk.Button(top, text="🔄 Refresh", command=self._load_backups).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(top, text="📥 Restore", command=self._restore).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(top, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("archive",)
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
@@ -695,12 +821,13 @@ class JobsTab(tk.Frame):
         self.refresh()
 
     def _build_ui(self):
-        toolbar = tk.Frame(self)
-        toolbar.pack(fill="x", pady=(0, 6))
-        tk.Button(toolbar, text="Add", command=self._add).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Toggle", command=self._toggle).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Delete", command=self._delete).pack(side="left", padx=(0, 4))
-        tk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
+        toolbar = tk.Frame(self, bg="#ecf0f1")
+        toolbar.pack(fill="x", pady=(0, 8))
+        ttk.Button(toolbar, text="➕ Add", command=self._add).pack(side="left", padx=(8, 4), pady=6)
+        ttk.Button(toolbar, text="⏯ Toggle", command=self._toggle).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(0, 4))
 
         cols = ("target", "store", "period", "next", "enabled")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
