@@ -22,18 +22,19 @@ class IPCProtocol(asyncio.Protocol):
             asyncio.create_task(self._handle(line))
 
     async def _handle(self, line: bytes):
+        req = protocol.decode(line)
+        cmd = req.get("cmd", "").lower()
+        self.daemon.logger.info(f"SERVER recv cmd={cmd} params={ {k:v for k,v in req.items() if k != 'cmd'} }")
         try:
-            req = protocol.decode(line)
-            cmd = req.get("cmd", "").lower()
             handler = getattr(self, f"_cmd_{cmd}", None)
             if handler:
                 await handler(req)
             else:
-                self.daemon.logger.warning(f"Unknown command from client: {cmd}")
+                self.daemon.logger.warning(f"SERVER unknown command: {cmd}")
                 self._send(ok=False, error=f"Unknown command: {cmd}")
         except Exception:
             tb = traceback.format_exc()
-            self.daemon.logger.error(f"Exception handling command {cmd}:\n{tb}")
+            self.daemon.logger.error(f"SERVER exception handling {cmd}:\n{tb}")
             self._send(ok=False, error=tb)
 
     def _send(self, ok=True, data=None, error=None):
@@ -245,6 +246,25 @@ class IPCProtocol(asyncio.Protocol):
             self._send(ok=True)
         except Exception:
             self._send(ok=False, error=traceback.format_exc())
+
+    async def _cmd_run_job(self, req):
+        self.daemon.logger.info(f"SERVER _cmd_run_job job_id={req.get('job_id')}")
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                self.daemon.run_job,
+                req["job_id"],
+            )
+            self.daemon.logger.info(f"SERVER _cmd_run_job success: {result}")
+            self._send(ok=True, data=result)
+        except UserError as e:
+            self.daemon.logger.warning(f"SERVER _cmd_run_job UserError: {e}")
+            self._send(ok=False, error=str(e))
+        except Exception:
+            tb = traceback.format_exc()
+            self.daemon.logger.error(f"SERVER _cmd_run_job exception:\n{tb}")
+            self._send(ok=False, error=tb)
 
     async def _cmd_toggle_job(self, req):
         try:

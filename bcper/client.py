@@ -1,8 +1,11 @@
+import logging
 import os
 import socket
 import threading
 
 from bcper_core import protocol
+
+_client_logger = logging.getLogger("bcper.client")
 
 
 class Client:
@@ -25,8 +28,10 @@ class Client:
             self._sock = None
 
     def _call(self, cmd: str, **kwargs) -> dict:
+        _client_logger.debug(f"CLIENT -> {cmd} {kwargs}")
         with self._lock:
             if self._sock is None:
+                _client_logger.debug("CLIENT connecting to daemon")
                 self.connect()
             try:
                 msg = protocol.request(cmd, **kwargs)
@@ -38,8 +43,11 @@ class Client:
                         raise ConnectionError("Daemon closed connection")
                     buf += chunk
                 line, _ = buf.split(b"\n", 1)
-                return protocol.decode(line)
-            except (OSError, ConnectionError):
+                resp = protocol.decode(line)
+                _client_logger.debug(f"CLIENT <- {cmd}: ok={resp.get('ok')} data={'<data>' if resp.get('data') is not None else 'None'} error={resp.get('error')}")
+                return resp
+            except (OSError, ConnectionError) as e:
+                _client_logger.warning(f"CLIENT connection error for {cmd}: {e}")
                 self.close()
                 raise
 
@@ -120,6 +128,9 @@ class Client:
 
     def delete_job(self, job_id: str):
         return self._call("DELETE_JOB", job_id=job_id)
+
+    def run_job(self, job_id: str):
+        return self._call("RUN_JOB", job_id=job_id)
 
     def toggle_job(self, job_id: str):
         return self._call("TOGGLE_JOB", job_id=job_id)

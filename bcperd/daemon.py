@@ -137,13 +137,25 @@ class Daemon:
             if trigger.should_run(job.last_run, job.next_run):
                 self._executor.submit(self._run_job, job)
 
-    def _run_job(self, job: Job):
-        self.logger.info(f"Running job {job.id}: {job.target_type}/{job.target_name}")
+    def run_job(self, job_id: str) -> dict:
+        self.logger.info(f"DAEMON run_job called id={job_id}")
+        with self.config_lock:
+            job = self.config.jobs.get(job_id)
+            if not job:
+                self.logger.error(f"DAEMON run_job: job {job_id} not found")
+                raise ValueError("Job not found")
+            self.logger.info(f"DAEMON run_job: found job {job_id} target={job.target_type}/{job.target_name} store={job.store_name}")
+        return self._run_job(job)
+
+    def _run_job(self, job: Job) -> dict:
+        self.logger.info(f"DAEMON _run_job START {job.id}: {job.target_type}/{job.target_name} -> {job.store_name}")
         try:
+            self.logger.info(f"DAEMON _run_job calling backup engine")
             result = self.run_backup(job.target_type, job.target_name, job.store_name)
-            self.logger.info(f"Job {job.id} succeeded: {result.get('archive')}")
+            self.logger.info(f"DAEMON _run_job SUCCESS {job.id}: archive={result.get('archive')}")
         except Exception as e:
-            self.logger.error(f"Job {job.id} failed: {e}")
+            self.logger.error(f"DAEMON _run_job FAILED {job.id}: {e}")
+            raise
         finally:
             with self.config_lock:
                 job.last_run = datetime.now().isoformat()
@@ -151,7 +163,10 @@ class Daemon:
                 if freq:
                     trigger = JobFrequencyTrigger(freq)
                     job.next_run = trigger.calculate_next_run(job.last_run)
+                    self.logger.info(f"DAEMON _run_job scheduled next_run={job.next_run} for {job.id}")
                 self.config.save()
+                self.logger.info(f"DAEMON _run_job config saved for {job.id}")
+        return result
 
     # ---- Operations ----
 

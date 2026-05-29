@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from .common import run_async
+from .common import run_async, _gui_logger
 
 
 class JobsTab(tk.Frame):
@@ -15,6 +15,8 @@ class JobsTab(tk.Frame):
         toolbar = tk.Frame(self, bg="#ecf0f1")
         toolbar.pack(fill="x", pady=(0, 8))
         ttk.Button(toolbar, text="➕ Add", command=self._add).pack(side="left", padx=(8, 4), pady=6)
+        ttk.Button(toolbar, text="✏️ Edit", command=self._edit).pack(side="left", padx=(0, 4), pady=6)
+        ttk.Button(toolbar, text="▶ Run", command=self._run).pack(side="left", padx=(0, 4), pady=6)
         ttk.Button(toolbar, text="⏯ Toggle", command=self._toggle).pack(side="left", padx=(0, 4), pady=6)
         ttk.Button(toolbar, text="🗑 Delete", command=self._delete).pack(side="left", padx=(0, 4), pady=6)
         ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh).pack(side="right", padx=(8, 0), pady=6)
@@ -35,7 +37,7 @@ class JobsTab(tk.Frame):
         self.tree.column("next", width=140)
         self.tree.column("enabled", width=70, anchor="center")
         self.tree.pack(fill="both", expand=True)
-        self.tree.bind("<Double-1>", lambda e: self._toggle())
+        self.tree.bind("<Double-1>", lambda e: self._edit())
 
         sb = ttk.Scrollbar(self.tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -65,6 +67,41 @@ class JobsTab(tk.Frame):
     def _add(self):
         JobDialog(self, self.client, callback=self.refresh)
 
+    def _edit(self):
+        jid = self._selected()
+        if not jid:
+            return
+        run_async(lambda: self.client.list_jobs(), lambda r, e: self._open_edit(r, e, jid))
+
+    def _open_edit(self, resp, err, jid):
+        if err:
+            return
+        for j in resp.get("data", []):
+            if j["id"] == jid:
+                JobDialog(self, self.client, job=j, callback=self.refresh)
+                return
+
+    def _run(self):
+        jid = self._selected()
+        _gui_logger.info(f"GUI JobsTab _run clicked job_id={jid}")
+        if not jid:
+            _gui_logger.warning("GUI JobsTab _run: no job selected")
+            return
+        _gui_logger.info(f"GUI JobsTab _run: calling client.run_job({jid})")
+        run_async(lambda: self.client.run_job(jid), self._on_run)
+
+    def _on_run(self, resp, err):
+        _gui_logger.info(f"GUI JobsTab _on_run resp_type={type(resp)} err={err}")
+        if err:
+            _gui_logger.error(f"GUI JobsTab _on_run error: {err}")
+            messagebox.showerror("Run Job", str(err))
+        else:
+            data = resp.get("data", {}) if isinstance(resp, dict) else {}
+            archive = data.get('archive', 'ok') if isinstance(data, dict) else str(data)
+            _gui_logger.info(f"GUI JobsTab _on_run success: archive={archive}")
+            messagebox.showinfo("Run Job", f"Backup created: {archive}")
+        self.refresh()
+
     def _toggle(self):
         jid = self._selected()
         if not jid:
@@ -80,11 +117,12 @@ class JobsTab(tk.Frame):
 
 
 class JobDialog(tk.Toplevel):
-    def __init__(self, master, client, callback=None):
+    def __init__(self, master, client, job=None, callback=None):
         super().__init__(master)
         self.client = client
+        self.job = job
         self.callback = callback
-        self.title("Add Job")
+        self.title("Edit Job" if job else "Add Job")
         self.transient(master)
         self.wait_visibility()
         self.grab_set()
@@ -102,7 +140,8 @@ class JobDialog(tk.Toplevel):
 
         tk.Label(f, text="Target Type:").grid(row=1, column=0, sticky="w")
         self.type_var = tk.StringVar(value="item")
-        ttk.Combobox(f, values=["item", "vault"], textvariable=self.type_var, state="readonly").grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
+        self.type_combo = ttk.Combobox(f, values=["item", "vault"], textvariable=self.type_var, state="readonly")
+        self.type_combo.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=2)
         self.type_var.trace_add("write", lambda *a: self._update_targets())
 
         tk.Label(f, text="Target:").grid(row=2, column=0, sticky="w")
@@ -126,13 +165,19 @@ class JobDialog(tk.Toplevel):
         run_async(self.client.list_stores, self._on_stores)
         run_async(self.client.list_frequencies, self._on_frequencies)
         self._update_targets()
+        if self.job:
+            self.name_var.set(self.job.get("name", ""))
+            self.type_var.set(self.job.get("target_type", "item"))
+            self.target_var.set(self.job.get("target_name", ""))
+            self.store_var.set(self.job.get("store_name", ""))
+            self.freq_var.set(self.job.get("frequency_id", ""))
 
     def _on_stores(self, resp, err):
         if err:
             return
         names = list(resp.get("data", {}).keys())
         self.store_combo["values"] = names
-        if names:
+        if names and not self.store_var.get():
             self.store_var.set(names[0])
 
     def _on_frequencies(self, resp, err):
@@ -141,7 +186,7 @@ class JobDialog(tk.Toplevel):
         freqs = resp.get("data", []) if isinstance(resp, dict) else []
         ids = [f.get("id", "?") for f in freqs if isinstance(f, dict)]
         self.freq_combo["values"] = ids
-        if ids:
+        if ids and not self.freq_var.get():
             self.freq_var.set(ids[0])
 
     def _update_targets(self):
@@ -166,7 +211,10 @@ class JobDialog(tk.Toplevel):
             "store_name": self.store_var.get(),
             "frequency_id": self.freq_var.get(),
         }
-        run_async(lambda: self.client.add_job(**data), self._on_save)
+        if self.job:
+            run_async(lambda: self.client.update_job(self.job["id"], **data), self._on_save)
+        else:
+            run_async(lambda: self.client.add_job(**data), self._on_save)
 
     def _on_save(self, resp, err):
         if err:
