@@ -645,7 +645,9 @@ class StoresTab(tk.Frame):
         tk.Entry(dlg, textvariable=name_var).grid(row=0, column=1, sticky="ew", padx=8, pady=4)
         tk.Label(dlg, text="Path:").grid(row=1, column=0, sticky="w", padx=8, pady=4)
         path_var = tk.StringVar(value="~/backups")
-        tk.Entry(dlg, textvariable=path_var).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
+        path_entry = tk.Entry(dlg, textvariable=path_var)
+        path_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=4)
+        tk.Button(dlg, text="Browse...", command=lambda: path_var.set(filedialog.askdirectory(parent=dlg, title="Select backup folder") or path_var.get())).grid(row=1, column=2, padx=(4, 8), pady=4)
         def save():
             run_async(lambda: self.client.add_store(name=name_var.get(), type="local", path=path_var.get()),
                       lambda r, e: (dlg.destroy(), self.refresh()) if not e else messagebox.showerror("Error", str(e), parent=dlg))
