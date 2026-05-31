@@ -236,3 +236,15 @@ Stored at `~/.config/bcper/`:
 ## Error Handling
 
 Expected errors (wrong password, missing target, rclone misconfiguration, daemon offline, etc.) are reported as clean user-facing messages without tracebacks. Unexpected bugs are logged with full tracebacks for debugging.
+
+## Screens: 
+
+![alt text](bcper/gui/assets/home_image.png)
+
+![alt text](bcper/gui/assets/edit_bcp.png)
+
+![alt text](bcper/gui/assets/freq.png)
+
+![alt text](bcper/gui/assets/jobs.png)
+
+![alt text](bcper/gui/assets/stores.png)
