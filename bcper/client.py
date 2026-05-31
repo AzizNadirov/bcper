@@ -75,11 +75,17 @@ class Client:
     def backup(self, target_type: str, target_name: str, store_name: str, progress_file: str = None):
         return self._call("BACKUP", target_type=target_type, target_name=target_name, store_name=store_name, progress_file=progress_file)
 
-    def restore(self, archive: str, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None):
-        return self._call("RESTORE", archive=archive, store_name=store_name, password=password, target_dir=target_dir, progress_file=progress_file)
+    def restore(self, run_id: str, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None):
+        return self._call("RESTORE", run_id=run_id, store_name=store_name, password=password, target_dir=target_dir, progress_file=progress_file)
 
-    def delete_backup(self, archive: str, store_name: str):
-        return self._call("DELETE_BACKUP", archive=archive, store_name=store_name)
+    def restore_many(self, run_ids: list, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None):
+        return self._call("RESTORE_MANY", run_ids=run_ids, store_name=store_name, password=password, target_dir=target_dir, progress_file=progress_file)
+
+    def delete_backup(self, run_id: str, store_name: str):
+        return self._call("DELETE_BACKUP", run_id=run_id, store_name=store_name)
+
+    def delete_backups(self, run_ids: list, store_name: str):
+        return self._call("DELETE_BACKUPS", run_ids=run_ids, store_name=store_name)
 
     def add_item(self, **data):
         return self._call("ADD_ITEM", **data)

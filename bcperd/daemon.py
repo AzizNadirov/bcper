@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from bcper_core.config import Config
-from bcper_core.engine import TarGzBackupEngine
+from bcper_core.engine import TarGzBackupEngine, UserError
 from bcper_core.models import (
     BCItem,
     BCVault,
@@ -18,8 +18,10 @@ from bcper_core.models import (
     BCItemTarget,
     BCVaultTarget,
     JobFrequencyTrigger,
+    validate_cron,
 )
 from bcper_core.storage import create_store
+from bcper_core import db as run_db
 
 
 class Daemon:
@@ -35,7 +37,11 @@ class Daemon:
         self._scheduler_thread = None
         self._shutdown_event = asyncio.Event()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="bcper_worker")
+        self._running_jobs: set = set()
+        self._running_jobs_lock = threading.Lock()
         self._setup_logging()
+        run_db.init_db()
+        self._cleanup_orphaned_jobs()
 
     def _setup_logging(self):
         os.makedirs(os.path.dirname(self.LOG_PATH), exist_ok=True)
@@ -49,6 +55,26 @@ class Daemon:
             format="%(asctime)s %(levelname)s %(message)s",
         )
         self.logger = logging.getLogger("bcperd")
+
+    def _cleanup_orphaned_jobs(self):
+        """Remove jobs whose targets, stores, or frequencies no longer exist."""
+        with self.config_lock:
+            to_remove = []
+            for jid, job in list(self.config.jobs.items()):
+                if job.target_type == "item" and job.target_name not in self.config.items:
+                    to_remove.append(jid)
+                elif job.target_type == "vault" and job.target_name not in self.config.vaults:
+                    to_remove.append(jid)
+                elif job.store_name not in self.config.stores:
+                    to_remove.append(jid)
+                elif job.frequency_id not in self.config.frequencies:
+                    to_remove.append(jid)
+            if to_remove:
+                for jid in to_remove:
+                    self.logger.info(f"CLEANUP removing orphaned job {jid}")
+                    del self.config.jobs[jid]
+                self.config.save()
+                self.logger.info(f"CLEANUP removed {len(to_remove)} orphaned job(s)")
 
     def _check_pid(self):
         if os.path.exists(self.PID_PATH):
@@ -78,6 +104,7 @@ class Daemon:
         self.logger.info(f"Registered commands: {commands}")
         self._scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
         self._scheduler_thread.start()
+        threading.Thread(target=self._catchup_missed_jobs, daemon=True).start()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -123,6 +150,36 @@ class Daemon:
             self._check_jobs()
             self._stop_event.wait(60)
 
+    def _catchup_missed_jobs(self):
+        """Run missed jobs sequentially on startup."""
+        from datetime import datetime
+        now = datetime.now()
+        with self.config_lock:
+            jobs = list(self.config.jobs.values())
+        missed = []
+        for job in jobs:
+            if not job.enabled:
+                continue
+            if not job.next_run:
+                continue
+            try:
+                if datetime.fromisoformat(job.next_run) <= now:
+                    missed.append(job)
+            except ValueError:
+                continue
+        if not missed:
+            self.logger.info("CATCHUP no missed jobs")
+            return
+        missed.sort(key=lambda j: j.next_run or "")
+        self.logger.info(f"CATCHUP {len(missed)} missed job(s) to run")
+        for job in missed:
+            self.logger.info(f"CATCHUP running job {job.id}: {job.name}")
+            try:
+                self._run_job(job)
+            except Exception as e:
+                self.logger.error(f"CATCHUP job {job.id} failed: {e}")
+        self.logger.info("CATCHUP done")
+
     def _check_jobs(self):
         now = datetime.now()
         with self.config_lock:
@@ -148,18 +205,57 @@ class Daemon:
         return self._run_job(job, progress_file)
 
     def _run_job(self, job: Job, progress_file: str = None) -> dict:
+        with self._running_jobs_lock:
+            self._running_jobs.add(job.id)
         self.logger.info(f"DAEMON _run_job START {job.id}: {job.target_type}/{job.target_name} -> {job.store_name}")
+        run_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        name_prefix = f"{job.name}/{run_id}/"
+        archive_name = f"{job.target_name}_{timestamp}.tar.gz"
+
+        run_db.insert_run({
+            "id": run_id,
+            "job_id": job.id,
+            "job_name": job.name,
+            "target_type": job.target_type,
+            "target_name": job.target_name,
+            "store_name": job.store_name,
+            "store_path": name_prefix,
+            "archive_name": archive_name,
+            "started_at": datetime.now().isoformat(),
+            "status": "running",
+        })
+
         try:
-            self.logger.info(f"DAEMON _run_job calling backup engine")
+            self.logger.info(f"DAEMON _run_job calling backup engine run_id={run_id}")
             from bcper_core.progress import make_progress_callback
             progress = make_progress_callback(progress_file)
-            result = self.run_backup(job.target_type, job.target_name, job.store_name, progress_file=progress_file)
+            result = self.run_backup(
+                job.target_type, job.target_name, job.store_name,
+                timestamp=timestamp, name_prefix=name_prefix, progress_file=progress_file,
+            )
             self.logger.info(f"DAEMON _run_job SUCCESS {job.id}: archive={result.get('archive')}")
+            run_db.update_run(
+                run_id,
+                status="success",
+                completed_at=datetime.now().isoformat(),
+                hash=result.get("hash"),
+                encrypted=result.get("encrypted"),
+                archive_name=os.path.basename(result.get("archive", archive_name)),
+            )
             self._apply_retention(job)
         except Exception as e:
             self.logger.error(f"DAEMON _run_job FAILED {job.id}: {e}")
+            run_db.update_run(
+                run_id,
+                status="failed",
+                completed_at=datetime.now().isoformat(),
+                error_message=str(e),
+            )
             raise
         finally:
+            with self._running_jobs_lock:
+                self._running_jobs.discard(job.id)
             with self.config_lock:
                 job.last_run = datetime.now().isoformat()
                 freq = self.config.frequencies.get(job.frequency_id)
@@ -178,21 +274,19 @@ class Daemon:
         store_cfg = self.config.stores.get(job.store_name)
         if not store_cfg:
             return
-        self.logger.info(f"DAEMON retention check for {job.target_name}: keep_last={keep}")
+        self.logger.info(f"DAEMON retention check for {job.id}: keep_last={keep}")
         try:
-            store = create_store(store_cfg)
-            all_files = store.list_backups()
-            prefix = f"{job.target_name}_"
-            archives = [f for f in all_files if f.startswith(prefix) and f.endswith((".tar.gz", ".tar.gz.enc"))]
-            archives.sort(reverse=True)
-            self.logger.info(f"DAEMON retention found {len(archives)} backups for {job.target_name}")
-            if len(archives) > keep:
-                to_delete = archives[keep:]
-                for name in to_delete:
-                    self.logger.info(f"DAEMON retention deleting old backup: {name}")
-                    store.delete(name)
+            to_delete = run_db.list_runs_for_retention(job.id, job.store_name, keep)
+            self.logger.info(f"DAEMON retention found {len(to_delete)} old runs to prune")
+            if to_delete:
+                store = create_store(store_cfg)
+                for run in to_delete:
+                    rel = run["store_path"] + run["archive_name"]
+                    self.logger.info(f"DAEMON retention deleting old backup: {rel}")
+                    store.delete(rel)
+                    run_db.delete_run(run["id"])
         except Exception as e:
-            self.logger.warning(f"DAEMON retention failed for {job.target_name}: {e}")
+            self.logger.warning(f"DAEMON retention failed for {job.id}: {e}")
 
     # ---- Operations ----
 
@@ -200,39 +294,55 @@ class Daemon:
         if target_type == "item":
             item = self.config.items.get(target_name)
             if not item:
-                raise RuntimeError(f"Item not found: {target_name}")
+                raise UserError(f"Item not found: {target_name}")
             return BCItemTarget(item)
         elif target_type == "vault":
             vault = self.config.vaults.get(target_name)
             if not vault:
-                raise RuntimeError(f"Vault not found: {target_name}")
+                raise UserError(f"Vault not found: {target_name}")
             items = {k: self.config.items[k] for k in vault.item_keys if k in self.config.items}
             return BCVaultTarget(vault, items)
         else:
-            raise ValueError(f"Invalid target type: {target_type}")
+            raise UserError(f"Invalid target type: {target_type}")
 
-    def run_backup(self, target_type: str, target_name: str, store_name: str, progress_file: str = None) -> dict:
-        self.logger.info(f"BACKUP {target_type}/{target_name} → {store_name} progress_file={progress_file}")
+    def run_backup(self, target_type: str, target_name: str, store_name: str, timestamp: str = None, name_prefix: str = "", progress_file: str = None) -> dict:
+        self.logger.info(f"BACKUP {target_type}/{target_name} → {store_name} prefix={name_prefix} progress_file={progress_file}")
         store_cfg = self.config.stores.get(store_name)
         if not store_cfg:
-            raise RuntimeError(f"Store not found: {store_name}")
-        store = create_store(store_cfg)
+            raise UserError(f"Store not found: {store_name}")
+        try:
+            store = create_store(store_cfg)
+        except RuntimeError as e:
+            raise UserError(str(e))
         target = self._resolve_target(target_type, target_name)
         from bcper_core.progress import make_progress_callback
         progress = make_progress_callback(progress_file)
-        result = self.engine.backup(target, store, progress=progress)
+        try:
+            result = self.engine.backup(target, store, timestamp=timestamp, name_prefix=name_prefix, progress=progress)
+        except RuntimeError as e:
+            raise UserError(str(e))
         self.logger.info(f"BACKUP done archive={result.get('archive')}")
         return result
 
-    def run_restore(self, archive_name: str, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None) -> dict:
-        self.logger.info(f"RESTORE {archive_name} from {store_name} progress_file={progress_file}")
+    def run_restore(self, run_id: str, store_name: str, password: str = None, target_dir: str = None, progress_file: str = None) -> dict:
+        self.logger.info(f"RESTORE run_id={run_id} from {store_name} progress_file={progress_file}")
+        run = run_db.get_run(run_id)
+        if not run:
+            raise UserError(f"Run not found: {run_id}")
         store_cfg = self.config.stores.get(store_name)
         if not store_cfg:
-            raise RuntimeError(f"Store not found: {store_name}")
-        store = create_store(store_cfg)
+            raise UserError(f"Store not found: {store_name}")
+        try:
+            store = create_store(store_cfg)
+        except RuntimeError as e:
+            raise UserError(str(e))
+        archive_name = run["store_path"] + run["archive_name"]
         from bcper_core.progress import make_progress_callback
         progress = make_progress_callback(progress_file)
-        result = self.engine.restore(archive_name, store, password=password, target_dir=target_dir, progress=progress)
+        try:
+            result = self.engine.restore(archive_name, store, password=password, target_dir=target_dir, progress=progress)
+        except RuntimeError as e:
+            raise UserError(str(e))
         self.logger.info(f"RESTORE done target={result.get('target_dir')}")
         return result
 
@@ -278,6 +388,12 @@ class Daemon:
                 for vault in self.config.vaults.values():
                     if key in vault.item_keys:
                         vault.item_keys.remove(key)
+                # Remove jobs that reference this item
+                jobs_to_remove = [jid for jid, job in self.config.jobs.items()
+                                  if job.target_type == "item" and job.target_name == key]
+                for jid in jobs_to_remove:
+                    del self.config.jobs[jid]
+                    self.logger.info(f"DELETE_ITEM removed orphaned job {jid}")
                 self.config.save()
                 self.logger.info(f"DELETE_ITEM done key={key}")
 
@@ -318,6 +434,12 @@ class Daemon:
         with self.config_lock:
             if name in self.config.vaults:
                 del self.config.vaults[name]
+                # Remove jobs that reference this vault
+                jobs_to_remove = [jid for jid, job in self.config.jobs.items()
+                                  if job.target_type == "vault" and job.target_name == name]
+                for jid in jobs_to_remove:
+                    del self.config.jobs[jid]
+                    self.logger.info(f"DELETE_VAULT removed orphaned job {jid}")
                 self.config.save()
                 self.logger.info(f"DELETE_VAULT done name={name}")
 
@@ -346,6 +468,12 @@ class Daemon:
         with self.config_lock:
             if name in self.config.stores:
                 del self.config.stores[name]
+                # Remove jobs that reference this store
+                jobs_to_remove = [jid for jid, job in self.config.jobs.items()
+                                  if job.store_name == name]
+                for jid in jobs_to_remove:
+                    del self.config.jobs[jid]
+                    self.logger.info(f"DELETE_STORE removed orphaned job {jid}")
                 self.config.save()
                 self.logger.info(f"DELETE_STORE done name={name}")
 
@@ -357,16 +485,17 @@ class Daemon:
         with self.config_lock:
             if freq_id in self.config.frequencies:
                 raise ValueError("Frequency already exists")
+            cron = data.get("cron", "").strip()
+            if cron and not validate_cron(cron):
+                raise ValueError(f"Invalid cron expression: {cron}")
             freq = JobFrequency(
                 id=freq_id,
                 name=data.get("name", "").strip(),
-                period_type=data.get("period_type", "once"),
-                interval=int(data.get("interval", 1)),
-                time=data.get("time", "").strip(),
+                cron=cron,
             )
             self.config.frequencies[freq_id] = freq
             self.config.save()
-            self.logger.info(f"ADD_FREQUENCY saved id={freq_id}")
+            self.logger.info(f"ADD_FREQUENCY saved id={freq_id} cron={cron}")
         return freq.to_dict()
 
     def update_frequency(self, freq_id: str, data: dict) -> dict:
@@ -376,12 +505,13 @@ class Daemon:
                 raise ValueError("Frequency not found")
             freq = self.config.frequencies[freq_id]
             freq.name = data.get("name", freq.name).strip()
-            freq.period_type = data.get("period_type", freq.period_type)
-            freq.interval = int(data.get("interval", freq.interval))
-            if "time" in data:
-                freq.time = data.get("time", "").strip()
+            if "cron" in data:
+                cron = data.get("cron", "").strip()
+                if cron and not validate_cron(cron):
+                    raise ValueError(f"Invalid cron expression: {cron}")
+                freq.cron = cron
             self.config.save()
-            self.logger.info(f"UPDATE_FREQUENCY saved id={freq_id}")
+            self.logger.info(f"UPDATE_FREQUENCY saved id={freq_id} cron={freq.cron}")
         return freq.to_dict()
 
     def delete_frequency(self, freq_id: str):

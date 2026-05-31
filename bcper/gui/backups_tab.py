@@ -27,10 +27,20 @@ class BackupsTab(tk.Frame):
         self.status_label = tk.Label(self, text="", fg="#555555", font=("Helvetica", 9, "italic"))
         self.status_label.pack(anchor="w", padx=8)
 
-        cols = ("archive",)
-        self.tree = ttk.Treeview(self, columns=cols, show="headings")
-        self.tree.heading("archive", text="Archive")
-        self.tree.column("archive", width=800)
+        cols = ("run_id", "job", "target", "started", "status", "encrypted")
+        self.tree = ttk.Treeview(self, columns=cols, show="headings", selectmode="extended")
+        self.tree.heading("run_id", text="Run ID")
+        self.tree.heading("job", text="Job")
+        self.tree.heading("target", text="Target")
+        self.tree.heading("started", text="Started")
+        self.tree.heading("status", text="Status")
+        self.tree.heading("encrypted", text="Encrypted")
+        self.tree.column("run_id", width=100)
+        self.tree.column("job", width=120)
+        self.tree.column("target", width=120)
+        self.tree.column("started", width=160)
+        self.tree.column("status", width=80)
+        self.tree.column("encrypted", width=80)
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Double-1>", lambda e: self._restore())
 
@@ -63,39 +73,61 @@ class BackupsTab(tk.Frame):
             self.status_label.config(text=f"Error: {err}")
             return
         self.status_label.config(text="")
-        for name in resp.get("data", []):
-            self.tree.insert("", "end", values=(name,), iid=name)
+        for run in resp.get("data", []):
+            rid = run.get("id", "")
+            short_id = rid[:8] if len(rid) >= 8 else rid
+            self.tree.insert(
+                "", "end",
+                values=(
+                    short_id,
+                    run.get("job_name", ""),
+                    run.get("target_name", ""),
+                    run.get("started_at", ""),
+                    run.get("status", ""),
+                    "Yes" if run.get("encrypted") else "No",
+                ),
+                iid=rid,
+            )
 
     def _selected(self):
-        sel = self.tree.selection()
-        return sel[0] if sel else None
+        return list(self.tree.selection())
 
     def _restore(self):
-        archive = self._selected()
-        if not archive:
+        run_ids = self._selected()
+        if not run_ids:
             return
         store = self.store_var.get()
         target = filedialog.askdirectory(title="Restore to directory")
         if not target:
             return
-        self._restore_ctx = {"archive": archive, "store": store, "target": target}
+        encrypted = False
+        for run_id in run_ids:
+            try:
+                vals = self.tree.item(run_id, "values")
+                if vals[5] == "Yes":
+                    encrypted = True
+                    break
+            except Exception:
+                pass
+        self._restore_ctx = {"run_ids": run_ids, "store": store, "target": target, "encrypted": encrypted}
         self._prompt_and_restore()
 
     def _prompt_and_restore(self, password=None):
         ctx = self._restore_ctx
-        archive = ctx["archive"]
+        run_ids = ctx["run_ids"]
         store = ctx["store"]
         target = ctx["target"]
-        if archive.endswith(".enc") and password is None:
+        encrypted = ctx["encrypted"]
+        if encrypted and password is None:
             pw = simpledialog.askstring("Password", "Enter password:", show="*", parent=self)
             if pw is None:
                 return
             password = pw
         run_async(
-            lambda path: self.client.restore(archive, store, password=password, target_dir=target, progress_file=path),
+            lambda path: self.client.restore_many(run_ids, store, password=password, target_dir=target, progress_file=path),
             self._on_restore,
             master=self,
-            progress_text="Restoring...",
+            progress_text=f"Restoring {len(run_ids)} backup(s)...",
         )
 
     def _on_restore(self, resp, err):
@@ -106,15 +138,42 @@ class BackupsTab(tk.Frame):
                 messagebox.showerror("Restore", str(err))
         else:
             data = resp.get("data", {})
-            msg = f"Restored to: {data.get('target_dir')}"
-            if data.get("warnings"):
-                msg += "\nWarnings:\n" + "\n".join(data["warnings"])
-            messagebox.showinfo("Restore", msg)
+            restored = data.get("restored", [])
+            errors = data.get("errors", [])
+            msg_parts = [f"Restored {len(restored)} backup(s) to: {data.get('target_dir')}"]
+            if errors:
+                msg_parts.append("Errors:\n" + "\n".join(errors))
+            warnings = data.get("warnings", [])
+            if warnings:
+                msg_parts.append("Warnings:\n" + "\n".join(warnings))
+            messagebox.showinfo("Restore", "\n\n".join(msg_parts))
 
     def _delete(self):
-        archive = self._selected()
-        if not archive:
+        run_ids = self._selected()
+        if not run_ids:
             return
         store = self.store_var.get()
-        if messagebox.askyesno("Delete", f"Delete '{archive}' from store '{store}'?"):
-            run_async(lambda _: self.client.delete_backup(archive, store), lambda r, e: self._load_backups() if not e else None, master=self, progress_text="Deleting...")
+        short_ids = [rid[:8] for rid in run_ids]
+        names = ", ".join(short_ids)
+        if messagebox.askyesno("Delete", f"Delete {len(run_ids)} backup(s) from store '{store}'?\n{names}"):
+            run_async(
+                lambda _: self.client.delete_backups(run_ids, store),
+                self._on_delete,
+                master=self,
+                progress_text=f"Deleting {len(run_ids)} backup(s)...",
+            )
+
+    def _on_delete(self, resp, err):
+        if err:
+            messagebox.showerror("Delete", str(err))
+        else:
+            data = resp.get("data", {})
+            deleted = data.get("deleted", 0)
+            errors = data.get("errors", [])
+            msg = f"Deleted {deleted} backup(s)."
+            if errors:
+                msg += "\nErrors:\n" + "\n".join(errors)
+                messagebox.showwarning("Delete", msg)
+            else:
+                messagebox.showinfo("Delete", msg)
+        self._load_backups()

@@ -1,9 +1,12 @@
 import asyncio
 import os
 import traceback
+import uuid
+from datetime import datetime
 
 from bcper_core import protocol
 from bcper_core.engine import UserError
+from bcper_core import db as run_db
 
 
 class IPCProtocol(asyncio.Protocol):
@@ -47,7 +50,13 @@ class IPCProtocol(asyncio.Protocol):
         self._send(ok=True, data="pong")
 
     async def _cmd_status(self, req):
-        self._send(ok=True, data={"pid": os.getpid(), "jobs": len(self.daemon.config.jobs)})
+        with self.daemon._running_jobs_lock:
+            running = list(self.daemon._running_jobs)
+        self._send(ok=True, data={
+            "pid": os.getpid(),
+            "jobs": len(self.daemon.config.jobs),
+            "running_jobs": running,
+        })
 
     async def _cmd_reload(self, req):
         with self.daemon.config_lock:
@@ -80,33 +89,58 @@ class IPCProtocol(asyncio.Protocol):
         if store_name not in self.daemon.config.stores:
             self._send(ok=False, error="Store not found")
             return
-        loop = asyncio.get_event_loop()
         try:
-            store = await loop.run_in_executor(
-                None, lambda: __import__("bcper_core.storage", fromlist=["create_store"]).create_store(
-                    self.daemon.config.stores[store_name]
-                )
-            )
-            files = await loop.run_in_executor(None, store.list_backups)
-            self._send(ok=True, data=files)
+            runs = run_db.list_runs(store_name=store_name)
+            self._send(ok=True, data=runs)
         except Exception:
             self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_backup(self, req):
         loop = asyncio.get_event_loop()
+        run_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        target_type = req["target_type"]
+        target_name = req["target_name"]
+        store_name = req["store_name"]
+        name_prefix = f"ad-hoc/{run_id}/"
+        archive_name = f"{target_name}_{timestamp}.tar.gz"
+
+        run_db.insert_run({
+            "id": run_id,
+            "job_id": None,
+            "job_name": "ad-hoc",
+            "target_type": target_type,
+            "target_name": target_name,
+            "store_name": store_name,
+            "store_path": name_prefix,
+            "archive_name": archive_name,
+            "started_at": datetime.now().isoformat(),
+            "status": "running",
+        })
+
+        def _do():
+            return self.daemon.run_backup(
+                target_type, target_name, store_name,
+                timestamp=timestamp, name_prefix=name_prefix,
+                progress_file=req.get("progress_file"),
+            )
+
         try:
-            result = await loop.run_in_executor(
-                None,
-                self.daemon.run_backup,
-                req["target_type"],
-                req["target_name"],
-                req["store_name"],
-                req.get("progress_file"),
+            result = await loop.run_in_executor(None, _do)
+            run_db.update_run(
+                run_id,
+                status="success",
+                completed_at=datetime.now().isoformat(),
+                hash=result.get("hash"),
+                encrypted=result.get("encrypted"),
+                archive_name=os.path.basename(result.get("archive", archive_name)),
             )
             self._send(ok=True, data=result)
         except UserError as e:
+            run_db.update_run(run_id, status="failed", completed_at=datetime.now().isoformat(), error_message=str(e))
             self._send(ok=False, error=str(e))
         except Exception:
+            run_db.update_run(run_id, status="failed", completed_at=datetime.now().isoformat(), error_message=traceback.format_exc())
             self._send(ok=False, error=traceback.format_exc())
 
     async def _cmd_restore(self, req):
@@ -115,7 +149,7 @@ class IPCProtocol(asyncio.Protocol):
             result = await loop.run_in_executor(
                 None,
                 self.daemon.run_restore,
-                req["archive"],
+                req["run_id"],
                 req["store_name"],
                 req.get("password"),
                 req.get("target_dir"),
@@ -129,9 +163,13 @@ class IPCProtocol(asyncio.Protocol):
 
     async def _cmd_delete_backup(self, req):
         store_name = req.get("store_name")
-        archive = req.get("archive")
+        run_id = req.get("run_id")
         if store_name not in self.daemon.config.stores:
             self._send(ok=False, error="Store not found")
+            return
+        run = run_db.get_run(run_id)
+        if not run:
+            self._send(ok=False, error="Run not found")
             return
         loop = asyncio.get_event_loop()
         try:
@@ -140,10 +178,101 @@ class IPCProtocol(asyncio.Protocol):
                     self.daemon.config.stores[store_name]
                 )
             )
-            await loop.run_in_executor(None, store.delete, archive)
+            rel = run["store_path"] + run["archive_name"]
+            await loop.run_in_executor(None, store.delete, rel)
+            run_db.delete_run(run_id)
             self._send(ok=True)
+        except RuntimeError as e:
+            self._send(ok=False, error=str(e))
         except Exception:
             self._send(ok=False, error=traceback.format_exc())
+
+    async def _cmd_restore_many(self, req):
+        loop = asyncio.get_event_loop()
+        run_ids = req.get("run_ids", [])
+        store_name = req.get("store_name")
+        password = req.get("password")
+        target_dir = req.get("target_dir")
+        progress_file = req.get("progress_file")
+
+        restored = []
+        errors = []
+        warnings = []
+
+        for run_id in run_ids:
+            try:
+                result = await loop.run_in_executor(
+                    None,
+                    self.daemon.run_restore,
+                    run_id,
+                    store_name,
+                    password,
+                    target_dir,
+                    progress_file,
+                )
+                restored.append(run_id)
+                if result and result.get("warnings"):
+                    warnings.extend(result["warnings"])
+            except UserError as e:
+                errors.append(f"{run_id[:8]}: {e}")
+            except Exception:
+                errors.append(f"{run_id[:8]}: {traceback.format_exc()}")
+
+        if not restored and errors:
+            self._send(ok=False, error=errors[0])
+            return
+
+        self._send(ok=True, data={
+            "target_dir": target_dir,
+            "restored": restored,
+            "errors": errors,
+            "warnings": warnings,
+        })
+
+    async def _cmd_delete_backups(self, req):
+        store_name = req.get("store_name")
+        run_ids = req.get("run_ids", [])
+        if store_name not in self.daemon.config.stores:
+            self._send(ok=False, error="Store not found")
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            store = await loop.run_in_executor(
+                None, lambda: __import__("bcper_core.storage", fromlist=["create_store"]).create_store(
+                    self.daemon.config.stores[store_name]
+                )
+            )
+        except RuntimeError as e:
+            self._send(ok=False, error=str(e))
+            return
+        except Exception:
+            self._send(ok=False, error=traceback.format_exc())
+            return
+
+        deleted = 0
+        errors = []
+
+        for run_id in run_ids:
+            run = run_db.get_run(run_id)
+            if not run:
+                errors.append(f"{run_id[:8]}: Run not found")
+                continue
+            try:
+                rel = run["store_path"] + run["archive_name"]
+                await loop.run_in_executor(None, store.delete, rel)
+                run_db.delete_run(run_id)
+                deleted += 1
+            except RuntimeError as e:
+                errors.append(f"{run_id[:8]}: {e}")
+            except Exception:
+                errors.append(f"{run_id[:8]}: {traceback.format_exc()}")
+
+        if not deleted and errors:
+            self._send(ok=False, error=errors[0])
+            return
+
+        self._send(ok=True, data={"deleted": deleted, "errors": errors})
 
     # ---- Config CRUD ----
 

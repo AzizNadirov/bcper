@@ -65,23 +65,23 @@ def sha256_bytes(data: bytes) -> str:
 
 
 class TarGzBackupEngine(BackupEngine):
-    def backup(self, target: BackupTarget, store: BackupStore, timestamp: str = None, progress: Callable[[str], None] = None) -> dict:
+    def backup(self, target: BackupTarget, store: BackupStore, timestamp: str = None, name_prefix: str = "", progress: Callable[[str], None] = None) -> dict:
         if progress is None:
             progress = _noop_progress
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         if isinstance(target, BCItemTarget):
-            return self._backup_item(target, store, timestamp, progress)
+            return self._backup_item(target, store, timestamp, name_prefix, progress)
         elif isinstance(target, BCVaultTarget):
-            return self._backup_vault(target, store, timestamp, progress)
+            return self._backup_vault(target, store, timestamp, name_prefix, progress)
         else:
             raise ValueError(f"Unsupported target type: {type(target)}")
 
-    def _backup_item(self, target: BCItemTarget, store: BackupStore, timestamp: str, progress: Callable[[str], None]) -> dict:
-        archive_name = f"{target.name}_{timestamp}.tar.gz"
-        meta_name = f"{target.name}_{timestamp}.meta.json"
-        hash_name = f"{target.name}_{timestamp}.sha256"
+    def _backup_item(self, target: BCItemTarget, store: BackupStore, timestamp: str, name_prefix: str, progress: Callable[[str], None]) -> dict:
+        archive_name = f"{name_prefix}{target.name}_{timestamp}.tar.gz"
+        meta_name = f"{name_prefix}{target.name}_{timestamp}.meta.json"
+        hash_name = f"{name_prefix}{target.name}_{timestamp}.sha256"
 
         matcher = IgnoreMatcher(target.get_ignore_patterns())
 
@@ -133,10 +133,10 @@ class TarGzBackupEngine(BackupEngine):
         finally:
             os.unlink(tmp_path)
 
-    def _backup_vault(self, target: BCVaultTarget, store: BackupStore, timestamp: str, progress: Callable[[str], None]) -> dict:
-        archive_name = f"{target.name}_{timestamp}.tar.gz"
-        meta_name = f"{target.name}_{timestamp}.meta.json"
-        hash_name = f"{target.name}_{timestamp}.sha256"
+    def _backup_vault(self, target: BCVaultTarget, store: BackupStore, timestamp: str, name_prefix: str, progress: Callable[[str], None]) -> dict:
+        archive_name = f"{name_prefix}{target.name}_{timestamp}.tar.gz"
+        meta_name = f"{name_prefix}{target.name}_{timestamp}.meta.json"
+        hash_name = f"{name_prefix}{target.name}_{timestamp}.sha256"
 
         item_targets = target.get_item_targets()
 

@@ -122,6 +122,7 @@ class StatusTab(tk.Frame):
         self.status_label = tk.Label(toolbar, text="Status: unknown")
         self.status_label.pack(side="left")
         tk.Button(toolbar, text="Start Daemon", command=self._start_daemon).pack(side="left", padx=(8, 4))
+        tk.Button(toolbar, text="Restart Daemon", command=self._restart_daemon).pack(side="left", padx=(0, 4))
         tk.Button(toolbar, text="Shell Integration", command=self._open_shell_dialog).pack(side="left", padx=(0, 4))
         tk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
 
@@ -197,6 +198,46 @@ class StatusTab(tk.Frame):
             except Exception:
                 pass
         messagebox.showerror("Daemon", "Failed to start daemon.")
+
+    def _restart_daemon(self):
+        pid_path = os.path.expanduser("~/.config/bcper/daemon.pid")
+        old_pid = None
+        if os.path.exists(pid_path):
+            with open(pid_path) as f:
+                old_pid = f.read().strip()
+            if old_pid and os.path.exists(f"/proc/{old_pid}"):
+                try:
+                    os.kill(int(old_pid), 15)  # SIGTERM
+                    for _ in range(20):
+                        time.sleep(0.15)
+                        if not os.path.exists(f"/proc/{old_pid}"):
+                            break
+                    else:
+                        os.kill(int(old_pid), 9)  # SIGKILL
+                        time.sleep(0.3)
+                except Exception:
+                    pass
+            try:
+                os.unlink(pid_path)
+            except Exception:
+                pass
+        sock_path = os.path.expanduser("~/.config/bcper/daemon.sock")
+        if os.path.exists(sock_path):
+            try:
+                os.unlink(sock_path)
+            except Exception:
+                pass
+        subprocess.Popen([sys.executable, "-m", "bcperd"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(10):
+            time.sleep(0.3)
+            try:
+                self.client.ping()
+                self.refresh()
+                return
+            except Exception:
+                pass
+        messagebox.showerror("Daemon", "Failed to restart daemon.")
 
     def _open_shell_dialog(self):
         ShellIntegrationDialog(self)

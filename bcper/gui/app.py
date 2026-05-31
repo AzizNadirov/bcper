@@ -60,6 +60,16 @@ class App(tk.Tk):
                  bg="#e74c3c", fg="#ffffff", font=("Helvetica", 10, "bold")).pack(side="left", padx=12, pady=6)
         ttk.Button(self._daemon_banner, text="Start Daemon", command=self._start_daemon).pack(side="right", padx=12, pady=4)
 
+        # Running jobs banner (hidden when idle)
+        self._jobs_banner = tk.Frame(self, bg="#3498db", height=36)
+        self._jobs_banner.pack(fill="x", side="top")
+        self._jobs_banner.pack_propagate(False)
+        self._jobs_label = tk.Label(self._jobs_banner, text="",
+                 bg="#3498db", fg="#ffffff", font=("Helvetica", 10, "bold"))
+        self._jobs_label.pack(side="left", padx=12, pady=6)
+        self._jobs_banner_visible = False
+        self._jobs_banner.pack_forget()
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=12, pady=(4, 12))
 
@@ -83,6 +93,7 @@ class App(tk.Tk):
         self._poll_queue()
         self._daemon_banner_visible = True  # banner is packed at startup
         self.after(200, self._check_daemon_loop)
+        self.after(1000, self._check_running_jobs_loop)
 
     def _poll_queue(self):
         try:
@@ -109,6 +120,38 @@ class App(tk.Tk):
             return True
         except Exception:
             return False
+
+    def _check_running_jobs_loop(self):
+        try:
+            resp = self.client.status()
+            data = resp.get("data", {})
+            running = data.get("running_jobs", [])
+            if running and not self._jobs_banner_visible:
+                names = []
+                for jid in running:
+                    # Try to resolve job name from local tabs if available
+                    name = jid[:8]
+                    try:
+                        for j in self.jobs_tab.tree.get_children():
+                            if j == jid:
+                                vals = self.jobs_tab.tree.item(j, "values")
+                                if vals:
+                                    name = vals[0]
+                                break
+                    except Exception:
+                        pass
+                    names.append(name)
+                self._jobs_label.config(text=f"⏳ Running backup(s): {', '.join(names)}")
+                self._jobs_banner.pack(fill="x", side="top", before=self.notebook)
+                self._jobs_banner_visible = True
+            elif not running and self._jobs_banner_visible:
+                self._jobs_banner.pack_forget()
+                self._jobs_banner_visible = False
+        except Exception:
+            if self._jobs_banner_visible:
+                self._jobs_banner.pack_forget()
+                self._jobs_banner_visible = False
+        self.after(2000, self._check_running_jobs_loop)
 
     def _start_daemon(self):
         pid_path = os.path.expanduser("~/.config/bcper/daemon.pid")

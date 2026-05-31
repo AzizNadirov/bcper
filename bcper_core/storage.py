@@ -42,6 +42,7 @@ class LocalStore(BackupStore):
 
     def save(self, name: str, data: bytes) -> str:
         path = self._path(name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             f.write(data)
         return path
@@ -59,14 +60,30 @@ class LocalStore(BackupStore):
         ]
         return sorted(files)
 
+    def _sidecar_base(self, path: str) -> str:
+        if path.endswith(".enc"):
+            path = path[:-4]
+        if path.endswith(".tar.gz"):
+            path = path[:-7]
+        return path
+
     def delete(self, name: str) -> None:
         path = self._path(name)
         if os.path.exists(path):
             os.remove(path)
+        base = self._sidecar_base(path)
         for ext in (".sha256", ".meta.json"):
-            p = path + ext
+            p = base + ext
             if os.path.exists(p):
                 os.remove(p)
+        # Remove empty parent directories up to base_path
+        dir_path = os.path.dirname(path)
+        while dir_path and dir_path.startswith(self.base_path) and dir_path != self.base_path:
+            try:
+                os.rmdir(dir_path)
+            except OSError:
+                break
+            dir_path = os.path.dirname(dir_path)
 
     def exists(self, name: str) -> bool:
         return os.path.exists(self._path(name))
@@ -143,17 +160,29 @@ class RcloneStore(BackupStore):
         _storage_logger.info(f"RcloneStore list_backups -> {len(out)} items")
         return out
 
+    def _sidecar_base(self, remote_path: str) -> str:
+        if remote_path.endswith(".enc"):
+            remote_path = remote_path[:-4]
+        if remote_path.endswith(".tar.gz"):
+            remote_path = remote_path[:-7]
+        return remote_path
+
     def delete(self, name: str) -> None:
         remote_path = self._remote_path(name)
         _storage_logger.info(f"RcloneStore delete {name} -> {remote_path}")
         result = subprocess.run([self._rclone, "delete", remote_path], capture_output=True, timeout=120)
         if result.returncode != 0:
             err = result.stderr.decode() if result.stderr else f"rclone delete exited {result.returncode}"
-            _storage_logger.error(f"RcloneStore delete FAILED {name}: {err}")
-            raise RuntimeError(err)
-        _storage_logger.info(f"RcloneStore delete OK {name}")
+            if "not found" in err.lower() or "directory not found" in err.lower() or "no such file" in err.lower():
+                _storage_logger.info(f"RcloneStore delete {name}: already gone ({err.strip()})")
+            else:
+                _storage_logger.error(f"RcloneStore delete FAILED {name}: {err}")
+                raise RuntimeError(err)
+        else:
+            _storage_logger.info(f"RcloneStore delete OK {name}")
+        base = self._sidecar_base(remote_path)
         for ext in (".sha256", ".meta.json"):
-            sidecar = remote_path + ext
+            sidecar = base + ext
             _storage_logger.info(f"RcloneStore delete sidecar {sidecar}")
             result = subprocess.run(
                 [self._rclone, "delete", sidecar],

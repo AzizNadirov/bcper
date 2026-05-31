@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Lightweight desktop backup manager with daemon and Tkinter GUI"
 requires-python = ">=3.8"
 dependencies = [
+    "croniter>=6.0.0",
     "cryptography>=3.0.0",
 ]
 

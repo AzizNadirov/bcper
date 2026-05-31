@@ -34,25 +34,11 @@ class Config:
             for k, v in data.get("frequencies", {}).items()
         }
 
-        # Jobs — migrate old format if needed
-        self.jobs = {}
-        for k, v in data.get("jobs", {}).items():
-            self.jobs[k] = self._migrate_job(v)
-
-    def _migrate_job(self, v: dict) -> Job:
-        """Migrate old BackupJob (embedded period) to new Job (frequency_id)."""
-        if "period" in v and "frequency_id" not in v:
-            freq_id = f"legacy_{v['id']}"
-            freq = JobFrequency(
-                id=freq_id,
-                name=f"Legacy {v['period']['period_type']}",
-                period_type=v["period"]["period_type"],
-                interval=v["period"].get("interval", 1),
-            )
-            self.frequencies[freq_id] = freq
-            v["frequency_id"] = freq_id
-            del v["period"]
-        return Job.from_dict(v)
+        # Jobs
+        self.jobs = {
+            k: Job.from_dict(v)
+            for k, v in data.get("jobs", {}).items()
+        }
 
     def save(self):
         data = {

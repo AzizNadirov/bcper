@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+from bcper_core.models import describe_cron
 from .client import Client
 
 
@@ -89,16 +90,21 @@ def cmd_freq_list(args):
     client = Client()
     data = _ok(client.list_frequencies())
     for freq in data:
-        print(f"  {freq['id']}: {freq['name']} ({freq['period_type']}, interval={freq['interval']})")
+        cron = freq.get('cron', '')
+        desc = describe_cron(cron) if cron else 'once'
+        print(f"  {freq['id']}: {freq['name']} ({desc})")
 
 
 def cmd_freq_add(args):
+    from bcper_core.models import validate_cron
+    if args.cron and not validate_cron(args.cron):
+        print(f"Error: Invalid cron expression: {args.cron}", file=sys.stderr)
+        sys.exit(1)
     client = Client()
     data = _ok(client.add_frequency(
         id=args.id,
         name=args.name,
-        period_type=args.period_type,
-        interval=args.interval,
+        cron=args.cron,
     ))
     print(f"Added frequency: {data['id']}")
 
@@ -208,8 +214,7 @@ def main():
     p = freq_sub.add_parser("add", help="Add frequency")
     p.add_argument("id")
     p.add_argument("name")
-    p.add_argument("--period-type", choices=["once", "hourly", "daily"], default="once")
-    p.add_argument("--interval", type=int, default=1)
+    p.add_argument("--cron", default="", help="Cron expression (5 fields). Empty means 'once'.")
     freq_sub.add_parser("delete", help="Delete frequency").add_argument("id")
 
     # job

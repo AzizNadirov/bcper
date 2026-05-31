@@ -61,21 +61,17 @@ class BCVault:
 class JobFrequency:
     id: str
     name: str
-    period_type: str  # "once", "hourly", "daily"
-    interval: int = 1
-    time: str = ""  # e.g. "14:30" for daily at 2:30 PM
+    cron: str = ""  # empty means "once"; otherwise standard 5-field cron
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "period_type": self.period_type, "interval": self.interval, "time": self.time}
+        return {"id": self.id, "name": self.name, "cron": self.cron}
 
     @classmethod
     def from_dict(cls, d):
         return cls(
             id=d["id"],
             name=d["name"],
-            period_type=d["period_type"],
-            interval=d.get("interval", 1),
-            time=d.get("time", ""),
+            cron=d.get("cron", ""),
         )
 
 
@@ -187,6 +183,81 @@ class BCVaultTarget(BackupTarget):
         return [BCItemTarget(self._items[k]) for k in self._vault.item_keys if k in self._items]
 
 
+def validate_cron(cron: str) -> bool:
+    """Validate a 5-field cron expression. Empty string is valid (means 'once')."""
+    if not cron.strip():
+        return True
+    from croniter import croniter
+    return croniter.is_valid(cron)
+
+
+def validate_cron_interval(cron: str) -> bool:
+    """Ensure no two cron occurrences are closer than 5 minutes."""
+    if not cron.strip():
+        return True
+    from croniter import croniter
+    from datetime import datetime, timedelta
+    base = datetime(2020, 1, 6, 0, 0, 0)
+    c = croniter(cron, base)
+    prev = c.get_next(datetime)
+    for _ in range(1000):
+        nxt = c.get_next(datetime)
+        if nxt - prev < timedelta(minutes=5):
+            return False
+        prev = nxt
+        if nxt - base > timedelta(days=8):
+            break
+    return True
+
+
+def describe_cron(cron: str) -> str:
+    """Return a human-readable description of a cron expression."""
+    if not cron.strip():
+        return "Once"
+    parts = cron.split()
+    if len(parts) != 5:
+        return cron
+    minute, hour, dom, month, dow = parts
+
+    # Every minute
+    if cron == "* * * * *":
+        return "Every minute"
+
+    # Every N minutes
+    if minute.startswith("*/") and hour == "*" and dom == "*" and month == "*" and dow == "*":
+        return f"Every {minute[2:]} minutes"
+
+    # Every hour at :MM
+    if minute != "*" and hour == "*" and dom == "*" and month == "*" and dow == "*":
+        return f"Every hour at :{minute.zfill(2)}"
+
+    # Every N hours at :MM
+    if minute != "*" and hour.startswith("*/") and dom == "*" and month == "*" and dow == "*":
+        return f"Every {hour[2:]} hours at :{minute.zfill(2)}"
+
+    # Daily at HH:MM
+    if minute != "*" and hour != "*" and dom == "*" and month == "*" and dow == "*":
+        return f"Daily at {hour.zfill(2)}:{minute.zfill(2)}"
+
+    # Weekly on specific day
+    days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    if minute != "*" and hour != "*" and dom == "*" and month == "*" and dow != "*":
+        if "," not in dow:
+            try:
+                day_idx = int(dow)
+                day_name = days[day_idx % 7]
+                return f"Weekly on {day_name} at {hour.zfill(2)}:{minute.zfill(2)}"
+            except ValueError:
+                pass
+        return f"Weekly ({dow}) at {hour.zfill(2)}:{minute.zfill(2)}"
+
+    # Monthly on specific day
+    if minute != "*" and hour != "*" and dom != "*" and month == "*" and dow == "*":
+        return f"Monthly on day {dom} at {hour.zfill(2)}:{minute.zfill(2)}"
+
+    return cron
+
+
 class BackupTrigger(ABC):
     """Determines when a job should run."""
 
@@ -204,33 +275,19 @@ class JobFrequencyTrigger(BackupTrigger):
         self._frequency = frequency
 
     def should_run(self, last_run: Optional[str], next_run: Optional[str]) -> bool:
+        if not next_run:
+            return False
         from datetime import datetime
-        now = datetime.now()
-        if self._frequency.period_type == "once":
-            if last_run:
-                return False
-            return next_run is not None and datetime.fromisoformat(next_run) <= now
-        next_run_dt = datetime.fromisoformat(next_run) if next_run else now
-        return next_run_dt <= now
+        return datetime.fromisoformat(next_run) <= datetime.now()
 
     def calculate_next_run(self, last_run: str) -> Optional[str]:
-        from datetime import datetime, timedelta
-        last = datetime.fromisoformat(last_run)
-        freq = self._frequency
-        if freq.period_type == "hourly":
-            return (last + timedelta(hours=freq.interval)).isoformat()
-        elif freq.period_type == "daily":
-            base = last + timedelta(days=freq.interval)
-            if freq.time:
-                try:
-                    hour, minute = map(int, freq.time.split(":", 1))
-                    base = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                    if base <= last:
-                        base = base + timedelta(days=freq.interval)
-                except ValueError:
-                    pass
-            return base.isoformat()
-        return None
+        if not self._frequency.cron:
+            return None  # "once" — never schedule again
+        from datetime import datetime
+        from croniter import croniter
+        now = datetime.now()
+        c = croniter(self._frequency.cron, now)
+        return c.get_next(datetime).isoformat()
 
 
 class BackupStore(ABC):
